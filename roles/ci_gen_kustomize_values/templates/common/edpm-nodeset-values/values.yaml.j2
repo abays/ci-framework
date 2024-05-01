@@ -51,6 +51,15 @@ data:
 {%        endif                                                                        %}
 {%      endfor                                                                         %}
 {% endfor                                                                              %}
+{% if ('repo-setup' not in (_original_nodeset['services'] | default([]))) and
+      ('repo-setup' in ci_gen_kustomize_edpm_nodeset_predeployed_services)             %}
+    services:
+      - "repo-setup"
+{%   for svc in ci_gen_kustomize_edpm_nodeset_predeployed_services                     %}
+      - "{{ svc }}"
+{%   endfor                                                                            %}
+{% endif                                                                               %}
+
 {% if 'compute' in _vm_type                                                            %}
   nova:
     migration:
