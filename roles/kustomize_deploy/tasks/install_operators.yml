@@ -260,3 +260,22 @@
           type: Available
           status: "True"
         wait_timeout: 300
+
+- name: Wait until OpenStack operators are deployed
+  when: not cifmw_kustomize_deploy_generate_crs_only
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    kind: Deployment
+    namespace: openstack-operators
+    label_selectors:
+      - openstack.org/operator-name
+    wait: true
+    wait_condition:
+      type: Available
+      status: "True"
+    wait_timeout: 600
+  check_mode: >-
+    {{
+      cifmw_kustomize_deploy_check_mode |
+      default(false, true)
+    }}
