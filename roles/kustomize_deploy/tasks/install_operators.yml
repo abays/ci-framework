@@ -319,6 +319,35 @@
           status: "True"
         wait_timeout: 300
 
+- name: Generate OpenStack initialization kustomization file
+  ansible.builtin.copy:
+    content: >-
+      {{
+        lookup(
+          'kubernetes.core.kustomize',
+          dir=cifmw_kustomize_deploy_openstack_source_files
+        )
+      }}
+    dest: "{{ cifmw_kustomize_deploy_openstack_dest_file }}"
+    mode: "0644"
+
+- name: Openstack initialization resources
+  when: not cifmw_kustomize_deploy_generate_crs_only
+  block:
+    - name: Apply the kustomized OpenStack initialization CRs
+      kubernetes.core.k8s:
+        kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+        api_key: "{{ cifmw_openshift_token | default(omit) }}"
+        context: "{{ cifmw_openshift_context | default(omit) }}"
+        state: present
+        wait: true
+        src: "{{ cifmw_kustomize_deploy_openstack_dest_file }}"
+      check_mode: >-
+        {{
+          cifmw_kustomize_deploy_check_mode |
+          default(false, true)
+        }}
+
 - name: Wait until OpenStack operators are deployed and ready
   when: not cifmw_kustomize_deploy_generate_crs_only
   kubernetes.core.k8s_info:
