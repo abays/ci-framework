@@ -90,7 +90,7 @@
 
 - name: Mask secrets in yaml log files
   ignore_errors: true  # noqa: ignore-errors
-  timeout: 3600
+  timeout: "{{ cifmw_artifacts_secret_mask_timeout }}"
   crawl_n_mask:
     path: "{{ item }}"
     isdir: true
