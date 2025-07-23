@@ -69,21 +69,6 @@ data:
 {% else %}
     iface: {{ omit if ns.interfaces[network.network_name] is not defined else network.network_name }}
 {%  endif %}
-{%  if network.tools.multus is defined and network.network_name == "ctlplane" %}
-    net-attach-def: |
-      {
-        "cniVersion": "0.3.1",
-        "name": "{{ network.network_name }}",
-        "type": "macvlan",
-        "master": "ospbr",
-        "ipam": {
-          "type": "whereabouts",
-          "range": "{{ network[_ipv.network_vX] }}",
-          "range_start": "{{ network.tools.multus[_ipv.ipvX_ranges].0.start }}",
-          "range_end": "{{ network.tools.multus[_ipv.ipvX_ranges].0.end }}"
-        }
-      }
-{%  endif %}
 {%  if network.tools.multus is defined and network.network_name == "octavia" %}
     net-attach-def: |
       {
@@ -124,7 +109,7 @@ data:
         }
       }
 {%  endif %}
-{%  if network.tools.multus is defined and network.network_name not in ["ctlplane", "octavia", "ironic"] %}
+{%  if network.tools.multus is defined and network.network_name not in ["octavia", "ironic"] %}
     net-attach-def: |
       {
         "cniVersion": "0.3.1",
