@@ -1,0 +1,126 @@
+---
+# End-to-end backup/restore test playbook
+#
+# Runs the full lifecycle:
+# 1. Install dependencies (MinIO + OADP)
+# 2. Create backup
+# 3. Cleanup namespace
+# 4. Restore from backup
+#
+# Each step can be enabled/disabled independently for iterative testing.
+#
+# Prerequisites:
+# - OpenStack control plane deployed and healthy
+# - OpenStackBackupConfig CR created (for backup labeling)
+#
+# Usage:
+#   # Full run:
+#   ansible-playbook playbooks/backup_restore.yaml
+#
+#   # Install deps only:
+#   ansible-playbook playbooks/backup_restore.yaml \
+#     -e cifmw_backup_restore_run_backup=false \
+#     -e cifmw_backup_restore_run_cleanup=false \
+#     -e cifmw_backup_restore_run_restore=false
+#
+#   # Backup only (deps already installed):
+#   ansible-playbook playbooks/backup_restore.yaml \
+#     -e cifmw_backup_restore_install_deps=false \
+#     -e cifmw_backup_restore_run_cleanup=false \
+#     -e cifmw_backup_restore_run_restore=false
+#
+#   # Cleanup + restore (backup already done):
+#   ansible-playbook playbooks/backup_restore.yaml \
+#     -e cifmw_backup_restore_install_deps=false \
+#     -e cifmw_backup_restore_run_backup=false \
+#     -e cifmw_backup_restore_backup_timestamp=20260323-144546
+#
+#   # Restore only (cleanup already done):
+#   ansible-playbook playbooks/backup_restore.yaml \
+#     -e cifmw_backup_restore_install_deps=false \
+#     -e cifmw_backup_restore_run_backup=false \
+#     -e cifmw_backup_restore_run_cleanup=false \
+#     -e cifmw_backup_restore_backup_timestamp=20260323-144546
+#
+#   # With PVC pinning (WaitForFirstConsumer storage):
+#   ansible-playbook playbooks/backup_restore.yaml \
+#     -e cifmw_backup_restore_pin_pvcs=true
+
+- name: Backup and Restore end-to-end test
+  hosts: "{{ cifmw_target_host | default('localhost') }}"
+  gather_facts: false
+
+  vars:
+    cifmw_backup_restore_install_deps: true
+    cifmw_backup_restore_run_backup: true
+    cifmw_backup_restore_run_cleanup: true
+    cifmw_backup_restore_run_restore: true
+    # cifmw_backup_restore_backup_timestamp: set this when running restore without backup step
+
+  tasks:
+    - name: Run pre_backup_restore hooks
+      vars:
+        step: pre_backup_restore
+      ansible.builtin.import_role:
+        name: run_hook
+
+    # ========================================
+    # Step 1: Install dependencies
+    # ========================================
+    - name: Setup MinIO
+      ansible.builtin.include_role:
+        name: deploy_minio
+      when: cifmw_backup_restore_install_deps | bool
+
+    - name: Setup OADP
+      ansible.builtin.include_role:
+        name: openshift_adp
+      vars:
+        cifmw_openshift_adp_s3_access_key: "{{ cifmw_deploy_minio_access_key }}"
+        cifmw_openshift_adp_s3_secret_key: "{{ cifmw_deploy_minio_secret_key }}"
+      when: cifmw_backup_restore_install_deps | bool
+
+    # ========================================
+    # Step 2: Create backup
+    # ========================================
+    - name: Create backup
+      ansible.builtin.include_role:
+        name: cifmw_backup_restore
+      vars:
+        cifmw_backup_restore_action: backup
+        cifmw_backup_restore_auto_ack: true
+      when: cifmw_backup_restore_run_backup | bool
+
+    - name: Print backup timestamp
+      ansible.builtin.debug:
+        msg: "Backup completed with timestamp: {{ cifmw_backup_restore_backup_name_suffix }}"
+      when: cifmw_backup_restore_run_backup | bool
+
+    # ========================================
+    # Step 3: Cleanup namespace
+    # ========================================
+    - name: Cleanup
+      ansible.builtin.include_role:
+        name: cifmw_backup_restore
+      vars:
+        cifmw_backup_restore_action: cleanup
+        cifmw_backup_restore_auto_ack: true
+      when: cifmw_backup_restore_run_cleanup | bool
+
+    # ========================================
+    # Step 4: Restore from backup
+    # ========================================
+    - name: Restore
+      ansible.builtin.include_role:
+        name: cifmw_backup_restore
+      vars:
+        cifmw_backup_restore_action: restore
+        cifmw_backup_restore_backup_timestamp: "{{ cifmw_backup_restore_backup_timestamp | default(cifmw_backup_restore_backup_name_suffix) }}"
+        cifmw_backup_restore_auto_ack: true
+      when: cifmw_backup_restore_run_restore | bool
+
+    - name: Run post_backup_restore hooks
+      vars:
+        step: post_backup_restore
+      ansible.builtin.import_role:
+        name: run_hook
