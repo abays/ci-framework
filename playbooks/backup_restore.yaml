@@ -115,7 +115,7 @@
         name: cifmw_backup_restore
       vars:
         cifmw_backup_restore_action: restore
-        cifmw_backup_restore_backup_timestamp: "{{ cifmw_backup_restore_backup_timestamp | default(cifmw_backup_restore_backup_name_suffix) }}"
+        cifmw_backup_restore_backup_timestamp: "{{ cifmw_backup_restore_backup_name_suffix }}"
         cifmw_backup_restore_auto_ack: true
       when: cifmw_backup_restore_run_restore | bool
 
