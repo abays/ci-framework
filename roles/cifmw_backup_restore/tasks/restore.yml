@@ -280,11 +280,10 @@
   changed_when: true
   when: _galerabackup_list | length > 0
 
-- name: Delete GaleraRestore CRs
-  ansible.builtin.shell: |
-    oc delete galerarestore {{ item }}restore -n {{ cifmw_backup_restore_namespace }} --ignore-not-found=true
+- name: List GaleraRestore CRs kept for validation
+  ansible.builtin.debug:
+    msg: "GaleraRestore CR '{{ item }}restore' kept for post-restore validation (cleaned up by cleanup step)"
   loop: "{{ _galerabackup_list }}"
-  changed_when: true
   when: _galerabackup_list | length > 0
 
 # ========================================
