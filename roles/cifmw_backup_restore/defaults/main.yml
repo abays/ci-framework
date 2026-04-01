@@ -39,6 +39,7 @@ cifmw_backup_restore_snapshot_move_data: true
 # Restore
 # cifmw_backup_restore_backup_timestamp: REQUIRED for restore (e.g., 20260311-081234)
 cifmw_backup_restore_restore_timeout: 900
+cifmw_backup_restore_edpm_deploy_timeout: 40m
 cifmw_backup_restore_infra_ready_timeout: 20m
 cifmw_backup_restore_ctlplane_ready_timeout: 10m
 cifmw_backup_restore_strict_restore: true
