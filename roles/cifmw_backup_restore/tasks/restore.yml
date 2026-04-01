@@ -463,6 +463,16 @@
     msg: "Created EDPM deployment: edpm-deployment-post-restore-{{ _restore_suffix }}"
   when: _nodeset_names.stdout != ""
 
+- name: Wait for EDPM deployment to complete
+  ansible.builtin.command:
+    cmd: >-
+      oc wait OpenStackDataPlaneDeployment
+      edpm-deployment-post-restore-{{ _restore_suffix }}
+      --namespace={{ cifmw_backup_restore_namespace }}
+      --for=condition=Ready
+      --timeout={{ cifmw_backup_restore_edpm_deploy_timeout }}
+  when: _nodeset_names.stdout != ""
+
 # ========================================
 # Cleanup and Summary
 # ========================================
