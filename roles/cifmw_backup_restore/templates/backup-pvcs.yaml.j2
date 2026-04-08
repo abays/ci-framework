@@ -6,6 +6,10 @@ kind: Backup
 metadata:
   name: openstack-backup-pvcs-{{ cifmw_backup_restore_backup_name_suffix }}
   namespace: {{ cifmw_backup_restore_oadp_namespace }}
+  annotations:
+    openstack.org/csv-version: "{{ _backup_csv_version }}"
+    openstack.org/catalog-source-image: "{{ _backup_catalog_image }}"
+    openstack.org/operator-image: "{{ _backup_operator_image }}"
 spec:
   includedNamespaces:
   - {{ cifmw_backup_restore_namespace }}
