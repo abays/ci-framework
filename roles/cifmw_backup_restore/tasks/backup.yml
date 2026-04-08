@@ -98,6 +98,44 @@
   ansible.builtin.set_fact:
     cifmw_backup_restore_backup_name_suffix: "{{ lookup('pipe', 'date +%Y%m%d-%H%M%S') }}"
 
+- name: Collect operator version information
+  ansible.builtin.shell: |
+    oc get csv -n openstack-operators \
+      -l operators.coreos.com/openstack-operator.openstack-operators \
+      -o jsonpath='{.items[0].metadata.name}'
+  register: _operator_csv_version
+  changed_when: false
+  failed_when: false
+
+- name: Collect catalog source image
+  ansible.builtin.shell: |
+    oc get catalogsource -n openstack-operators \
+      -o jsonpath='{.items[0].spec.image}'
+  register: _operator_catalog_image
+  changed_when: false
+  failed_when: false
+
+- name: Collect operator image
+  ansible.builtin.shell: |
+    oc get deployment openstack-operator-controller-manager \
+      -n openstack-operators -o jsonpath='{.spec.template.spec.containers[0].image}'
+  register: _operator_image
+  changed_when: false
+  failed_when: false
+
+- name: Set operator version facts
+  ansible.builtin.set_fact:
+    _backup_csv_version: "{{ _operator_csv_version.stdout | default('unknown') }}"
+    _backup_catalog_image: "{{ _operator_catalog_image.stdout | default('unknown') }}"
+    _backup_operator_image: "{{ _operator_image.stdout | default('unknown') }}"
+
+- name: Display operator version information
+  ansible.builtin.debug:
+    msg:
+      - "CSV version:      {{ _backup_csv_version }}"
+      - "Catalog image:    {{ _backup_catalog_image }}"
+      - "Operator image:   {{ _backup_operator_image }}"
+
 - name: Create temp directory for rendered templates
   ansible.builtin.tempfile:
     state: directory
@@ -294,6 +332,11 @@
       - "Backup name suffix: {{ cifmw_backup_restore_backup_name_suffix }}"
       - "PVC backup:       openstack-backup-pvcs-{{ cifmw_backup_restore_backup_name_suffix }}"
       - "Resources backup: openstack-backup-resources-{{ cifmw_backup_restore_backup_name_suffix }}"
+      - ""
+      - "Operator version recorded on Backup CRs:"
+      - "  CSV:     {{ _backup_csv_version }}"
+      - "  Catalog: {{ _backup_catalog_image }}"
+      - "  Image:   {{ _backup_operator_image }}"
 
 - name: Cleanup rendered templates
   ansible.builtin.file:

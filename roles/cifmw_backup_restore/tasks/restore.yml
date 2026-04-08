@@ -74,6 +74,46 @@
   when: _pvc_backup_phase.stdout != "Completed" or _resources_backup_phase.stdout != "Completed"
 
 # ========================================
+# Operator version validation
+# ========================================
+- name: Get required operator version from backup
+  ansible.builtin.shell: |
+    oc get backup {{ _resources_backup_name }} -n {{ cifmw_backup_restore_oadp_namespace }} \
+      -o jsonpath='{.metadata.annotations.openstack\.org/csv-version}'
+  register: _backup_csv_version
+  changed_when: false
+  failed_when: false
+
+- name: Get installed operator version
+  ansible.builtin.shell: |
+    oc get csv -n openstack-operators \
+      -l operators.coreos.com/openstack-operator.openstack-operators \
+      -o jsonpath='{.items[0].metadata.name}'
+  register: _installed_csv_version
+  changed_when: false
+  failed_when: false
+
+- name: Display operator version comparison
+  ansible.builtin.debug:
+    msg:
+      - "Backup operator version:    {{ _backup_csv_version.stdout | default('not recorded') }}"
+      - "Installed operator version: {{ _installed_csv_version.stdout | default('not installed') }}"
+
+- name: Warn if operator version does not match backup
+  ansible.builtin.fail:
+    msg: |
+      Operator version mismatch!
+      Backup requires:  {{ _backup_csv_version.stdout }}
+      Installed version: {{ _installed_csv_version.stdout | default('not installed') }}
+      Install the correct operator version before restoring.
+      Catalog source image from backup:
+        oc get backup {{ _resources_backup_name }} -n {{ cifmw_backup_restore_oadp_namespace }} \
+          -o jsonpath='{.metadata.annotations.openstack\.org/catalog-source-image}'
+  when:
+    - _backup_csv_version.stdout | default('') != ''
+    - _installed_csv_version.stdout | default('') != _backup_csv_version.stdout
+
+# ========================================
 # Resource modifier ConfigMap
 # ========================================
 - name: Render resource modifier ConfigMap
