@@ -259,7 +259,7 @@
         -o jsonpath='{.status.phase} {.status.progress.itemsBackedUp} {.status.progress.totalItems} {.status.backupItemOperationsCompleted} {.status.backupItemOperationsAttempted}' 2>/dev/null)
       PROGRESS="Phase: ${PHASE:-Pending} | Items: ${ITEMS_DONE:-0}/${ITEMS_TOTAL:-?}"
       [ -n "${OPS_TOTAL}" ] && PROGRESS="${PROGRESS} | Operations: ${OPS_DONE:-0}/${OPS_TOTAL}"
-      echo "  $(date +%H:%M:%S) ${PROGRESS}" > /dev/tty
+      echo "  $(date +%H:%M:%S) ${PROGRESS}" >&2
       case "${PROGRESS}" in
         *"Phase: Completed"*)
           echo "${PROGRESS}"
@@ -305,7 +305,7 @@
         -o jsonpath='{.status.phase} {.status.progress.itemsBackedUp} {.status.progress.totalItems} {.status.backupItemOperationsCompleted} {.status.backupItemOperationsAttempted}' 2>/dev/null)
       PROGRESS="Phase: ${PHASE:-Pending} | Items: ${ITEMS_DONE:-0}/${ITEMS_TOTAL:-?}"
       [ -n "${OPS_TOTAL}" ] && PROGRESS="${PROGRESS} | Operations: ${OPS_DONE:-0}/${OPS_TOTAL}"
-      echo "  $(date +%H:%M:%S) ${PROGRESS}" > /dev/tty
+      echo "  $(date +%H:%M:%S) ${PROGRESS}" >&2
       case "${PROGRESS}" in
         *"Phase: Completed"*)
           echo "${PROGRESS}"

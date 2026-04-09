@@ -31,7 +31,7 @@
         -o jsonpath='{.status.phase} {.status.progress.itemsRestored} {.status.progress.totalItems}' 2>/dev/null)
       PHASE=${PHASE:-Pending}
       PROGRESS="Phase: ${PHASE} | Items: ${ITEMS_DONE:-0}/${ITEMS_TOTAL:-?}"
-      echo "  $(date +%H:%M:%S) ${PROGRESS}" > /dev/tty
+      echo "  $(date +%H:%M:%S) ${PROGRESS}" >&2
       case "${PHASE}" in
         Completed|PartiallyFailed|Failed|FailedValidation)
           echo "${PHASE}"
