@@ -168,11 +168,11 @@
         echo "All pods terminated"
         exit 0
       fi
-      echo "  $(date +%H:%M:%S) Pods: ${RUNNING} remaining (${TERMINATING} terminating)" > /dev/tty
+      echo "  $(date +%H:%M:%S) Pods: ${RUNNING} remaining (${TERMINATING} terminating)" >&2
       if [ $ELAPSED -ge $FORCE_AFTER ] && [ "${FORCED}" = "false" ]; then
         STUCK=$(oc get pods -n {{ cifmw_backup_restore_namespace }} --no-headers -o name 2>/dev/null | head -50)
         if [ -n "${STUCK}" ]; then
-          echo "  $(date +%H:%M:%S) Force deleting stuck pods..." > /dev/tty
+          echo "  $(date +%H:%M:%S) Force deleting stuck pods..." >&2
           echo ${STUCK} | xargs oc delete -n {{ cifmw_backup_restore_namespace }} --force --grace-period=0 2>/dev/null || true
           FORCED=true
         fi
