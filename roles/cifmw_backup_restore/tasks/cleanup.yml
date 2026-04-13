@@ -156,34 +156,42 @@
   when: cifmw_backup_restore_cleanup_ctlplane | bool
 
 - name: Wait for pods to terminate
-  ansible.builtin.shell: |
-    TIMEOUT=300
-    FORCE_AFTER=60
-    ELAPSED=0
-    FORCED=false
-    while [ $ELAPSED -lt $TIMEOUT ]; do
-      RUNNING=$(oc get pods -n {{ cifmw_backup_restore_namespace }} --field-selector='status.phase!=Succeeded' --no-headers 2>/dev/null | wc -l)
-      TERMINATING=$(oc get pods -n {{ cifmw_backup_restore_namespace }} --no-headers 2>/dev/null | grep -c Terminating || true)
-      if [ "${RUNNING}" -eq 0 ]; then
-        echo "All pods terminated"
-        exit 0
-      fi
-      echo "  $(date +%H:%M:%S) Pods: ${RUNNING} remaining (${TERMINATING} terminating)" >&2
-      if [ $ELAPSED -ge $FORCE_AFTER ] && [ "${FORCED}" = "false" ]; then
-        STUCK=$(oc get pods -n {{ cifmw_backup_restore_namespace }} --no-headers -o name 2>/dev/null | head -50)
-        if [ -n "${STUCK}" ]; then
-          echo "  $(date +%H:%M:%S) Force deleting stuck pods..." >&2
-          echo ${STUCK} | xargs oc delete -n {{ cifmw_backup_restore_namespace }} --force --grace-period=0 2>/dev/null || true
-          FORCED=true
-        fi
-      fi
-      sleep 5
-      ELAPSED=$((ELAPSED + 5))
-    done
-    echo "WARNING: ${RUNNING} pods still remaining after timeout" >&2
-    exit 0
+  ansible.builtin.command:
+    cmd: >-
+      oc get pods -n {{ cifmw_backup_restore_namespace }}
+      --field-selector=status.phase!=Succeeded --no-headers
+  register: _remaining_pods
   changed_when: false
+  failed_when: false
+  until: _remaining_pods.stdout_lines | length == 0
+  retries: 12
+  delay: 5
   when: cifmw_backup_restore_cleanup_ctlplane | bool
+
+- name: Force delete stuck pods if still remaining
+  when:
+    - cifmw_backup_restore_cleanup_ctlplane | bool
+    - _remaining_pods.stdout_lines | default([]) | length > 0
+  block:
+    - name: Force delete remaining pods
+      ansible.builtin.command:
+        cmd: >-
+          oc delete pods --all -n {{ cifmw_backup_restore_namespace }}
+          --force --grace-period=0
+      changed_when: true
+      failed_when: false
+
+    - name: Wait for pods after force delete
+      ansible.builtin.command:
+        cmd: >-
+          oc get pods -n {{ cifmw_backup_restore_namespace }}
+          --field-selector=status.phase!=Succeeded --no-headers
+      register: _remaining_pods_final
+      changed_when: false
+      failed_when: false
+      until: _remaining_pods_final.stdout_lines | length == 0
+      retries: 48
+      delay: 5
 
 - name: Delete OpenStackBackupConfig CRs
   ansible.builtin.shell: |

@@ -250,31 +250,21 @@
   changed_when: true
 
 - name: Wait for PVC backup to complete
-  ansible.builtin.shell: |
-    BACKUP_NAME="openstack-backup-pvcs-{{ cifmw_backup_restore_backup_name_suffix }}"
-    TIMEOUT={{ cifmw_backup_restore_oadp_backup_timeout | regex_replace('[^0-9]', '') }}
-    ELAPSED=0
-    while [ $ELAPSED -lt $((TIMEOUT * 60)) ]; do
-      read -r PHASE ITEMS_DONE ITEMS_TOTAL OPS_DONE OPS_TOTAL <<< $(oc get backup ${BACKUP_NAME} -n {{ cifmw_backup_restore_oadp_namespace }} \
-        -o jsonpath='{.status.phase} {.status.progress.itemsBackedUp} {.status.progress.totalItems} {.status.backupItemOperationsCompleted} {.status.backupItemOperationsAttempted}' 2>/dev/null)
-      PROGRESS="Phase: ${PHASE:-Pending} | Items: ${ITEMS_DONE:-0}/${ITEMS_TOTAL:-?}"
-      [ -n "${OPS_TOTAL}" ] && PROGRESS="${PROGRESS} | Operations: ${OPS_DONE:-0}/${OPS_TOTAL}"
-      echo "  $(date +%H:%M:%S) ${PROGRESS}" >&2
-      case "${PROGRESS}" in
-        *"Phase: Completed"*)
-          echo "${PROGRESS}"
-          exit 0 ;;
-        *"Phase: Failed"*|*"Phase: PartiallyFailed"*)
-          echo "${PROGRESS}" >&2
-          exit 1 ;;
-      esac
-      sleep 10
-      ELAPSED=$((ELAPSED + 10))
-    done
-    echo "Timeout waiting for backup ${BACKUP_NAME} after ${TIMEOUT}m" >&2
-    exit 1
-  register: _pvc_backup_progress
+  ansible.builtin.command:
+    cmd: >-
+      oc get backup openstack-backup-pvcs-{{ cifmw_backup_restore_backup_name_suffix }}
+      -n {{ cifmw_backup_restore_oadp_namespace }}
+      -o jsonpath='{.status.phase}'
+  register: _pvc_backup_phase
   changed_when: false
+  until: _pvc_backup_phase.stdout in ["Completed", "Failed", "PartiallyFailed"]
+  retries: "{{ (cifmw_backup_restore_oadp_backup_timeout | regex_replace('[^0-9]', '') | int * 60 / 10) | int }}"
+  delay: 10
+
+- name: Fail if PVC backup did not complete
+  ansible.builtin.fail:
+    msg: "PVC backup ended with phase: {{ _pvc_backup_phase.stdout }}"
+  when: _pvc_backup_phase.stdout != "Completed"
 
 # ========================================
 # Step 3: OADP Resources Backup
@@ -296,31 +286,21 @@
   changed_when: true
 
 - name: Wait for resources backup to complete
-  ansible.builtin.shell: |
-    BACKUP_NAME="openstack-backup-resources-{{ cifmw_backup_restore_backup_name_suffix }}"
-    TIMEOUT={{ cifmw_backup_restore_oadp_backup_timeout | regex_replace('[^0-9]', '') }}
-    ELAPSED=0
-    while [ $ELAPSED -lt $((TIMEOUT * 60)) ]; do
-      read -r PHASE ITEMS_DONE ITEMS_TOTAL OPS_DONE OPS_TOTAL <<< $(oc get backup ${BACKUP_NAME} -n {{ cifmw_backup_restore_oadp_namespace }} \
-        -o jsonpath='{.status.phase} {.status.progress.itemsBackedUp} {.status.progress.totalItems} {.status.backupItemOperationsCompleted} {.status.backupItemOperationsAttempted}' 2>/dev/null)
-      PROGRESS="Phase: ${PHASE:-Pending} | Items: ${ITEMS_DONE:-0}/${ITEMS_TOTAL:-?}"
-      [ -n "${OPS_TOTAL}" ] && PROGRESS="${PROGRESS} | Operations: ${OPS_DONE:-0}/${OPS_TOTAL}"
-      echo "  $(date +%H:%M:%S) ${PROGRESS}" >&2
-      case "${PROGRESS}" in
-        *"Phase: Completed"*)
-          echo "${PROGRESS}"
-          exit 0 ;;
-        *"Phase: Failed"*|*"Phase: PartiallyFailed"*)
-          echo "${PROGRESS}" >&2
-          exit 1 ;;
-      esac
-      sleep 10
-      ELAPSED=$((ELAPSED + 10))
-    done
-    echo "Timeout waiting for backup ${BACKUP_NAME} after ${TIMEOUT}m" >&2
-    exit 1
-  register: _resources_backup_progress
+  ansible.builtin.command:
+    cmd: >-
+      oc get backup openstack-backup-resources-{{ cifmw_backup_restore_backup_name_suffix }}
+      -n {{ cifmw_backup_restore_oadp_namespace }}
+      -o jsonpath='{.status.phase}'
+  register: _resources_backup_phase
   changed_when: false
+  until: _resources_backup_phase.stdout in ["Completed", "Failed", "PartiallyFailed"]
+  retries: "{{ (cifmw_backup_restore_oadp_backup_timeout | regex_replace('[^0-9]', '') | int * 60 / 10) | int }}"
+  delay: 10
+
+- name: Fail if resources backup did not complete
+  ansible.builtin.fail:
+    msg: "Resources backup ended with phase: {{ _resources_backup_phase.stdout }}"
+  when: _resources_backup_phase.stdout != "Completed"
 
 # ========================================
 # Summary
