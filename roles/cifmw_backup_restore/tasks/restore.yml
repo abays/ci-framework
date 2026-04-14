@@ -326,106 +326,13 @@
   loop: "{{ _galerabackup_list }}"
   when: _galerabackup_list | length > 0
 
-# ========================================
-# Step 8: Restore RabbitMQ Credentials
-# ========================================
-- name: Get RabbitMQ cluster names from OpenStackControlPlane
-  ansible.builtin.shell: |
-    oc get openstackcontrolplane -n {{ cifmw_backup_restore_namespace }} \
-      -o jsonpath='{.items[0].spec.rabbitmq.templates}' | jq -r 'keys[]'
-  register: _rabbitmq_cluster_names
-  changed_when: false
-
-- name: Set RabbitMQ cluster list
-  ansible.builtin.set_fact:
-    _rabbitmq_clusters: "{{ _rabbitmq_cluster_names.stdout_lines if _rabbitmq_cluster_names.stdout != '' else [] }}"
-
-- name: Print RabbitMQ clusters found
-  ansible.builtin.debug:
-    msg: "RabbitMQ clusters: {{ _rabbitmq_clusters if _rabbitmq_clusters | length > 0 else 'none' }}"
-
-- name: Render RabbitMQ restore resources
-  ansible.builtin.template:
-    src: "{{ item.src }}"
-    dest: "{{ _cifmw_backup_restore_rendered_dir.path }}/{{ item.dest }}"
-  vars:
-    resources_backup_name: "{{ _resources_backup_name }}"
-    restore_suffix: "{{ _restore_suffix }}"
-    rabbitmq_clusters: "{{ _rabbitmq_clusters }}"
-  loop:
-    - src: 06b-resource-modifiers-tmp.yaml.j2
-      dest: 06b-resource-modifiers-tmp.yaml
-    - src: 06b-restore-rabbitmq-secrets.yaml.j2
-      dest: 06b-restore-rabbitmq-secrets.yaml
-    - src: 06c-rabbitmquser.yaml.j2
-      dest: 06c-rabbitmquser.yaml
-  when: _rabbitmq_clusters | length > 0
-
-- name: Delete temp namespace if it exists
-  ansible.builtin.shell: |
-    if oc get namespace openstack-restore-tmp &>/dev/null; then
-      for SECRET in $(oc get secret -n openstack-restore-tmp -o name 2>/dev/null); do
-        oc patch ${SECRET} -n openstack-restore-tmp --type=merge -p '{"metadata":{"finalizers":null}}' 2>/dev/null || true
-      done
-      oc delete namespace openstack-restore-tmp --wait=true --timeout=60s
-    fi
-  changed_when: true
-
-- name: Create temp namespace for RabbitMQ secret restore
-  ansible.builtin.shell: |
-    oc create namespace openstack-restore-tmp
-  changed_when: true
-
-- name: Create resource modifier for temp restore
-  ansible.builtin.shell: |
-    oc apply -f {{ _cifmw_backup_restore_rendered_dir.path }}/06b-resource-modifiers-tmp.yaml
-  changed_when: true
-
-- name: Restore secrets to temp namespace
-  ansible.builtin.shell: |
-    oc apply -f {{ _cifmw_backup_restore_rendered_dir.path }}/06b-restore-rabbitmq-secrets.yaml
-  changed_when: true
-
-- name: Wait for RabbitMQ secret restore
-  ansible.builtin.include_tasks: wait_for_restore.yml
-  vars:
-    _restore_name: "openstack-restore-rabbitmq-secrets-{{ _restore_suffix }}"
-    _step_name: "Step 8 (RabbitMQ secret restore)"
-
-- name: Copy default-user secrets to restored-user in target namespace
-  ansible.builtin.shell: |
-    CLUSTER_NAME="{{ item }}"
-    SOURCE_SECRET="${CLUSTER_NAME}-default-user"
-    TARGET_SECRET="${CLUSTER_NAME}-restored-user"
-    if ! oc get secret "${SOURCE_SECRET}" -n openstack-restore-tmp &>/dev/null; then
-      echo "WARNING: Secret ${SOURCE_SECRET} not found in temp namespace - skipping"
-      exit 0
-    fi
-    TMPDIR=$(mktemp -d)
-    oc extract secret/${SOURCE_SECRET} -n openstack-restore-tmp --to=${TMPDIR} --confirm
-    oc create secret generic ${TARGET_SECRET} -n {{ cifmw_backup_restore_namespace }} --from-file=${TMPDIR}
-    rm -rf ${TMPDIR}
-  loop: "{{ _rabbitmq_clusters }}"
-  changed_when: true
-
-- name: Delete temp namespace
-  ansible.builtin.shell: |
-    oc delete namespace openstack-restore-tmp --wait=false
-  changed_when: true
-
-- name: Apply RabbitMQUser CRs
-  ansible.builtin.shell: |
-    oc apply -f {{ _cifmw_backup_restore_rendered_dir.path }}/06c-rabbitmquser.yaml
-  changed_when: true
-
-- name: Wait for RabbitMQUser CRs to be ready
-  ansible.builtin.shell: |
-    oc wait rabbitmquser --all -n {{ cifmw_backup_restore_namespace }} --for=jsonpath='{.status.conditions[0].status}'=True --timeout=120s
-  changed_when: false
-  failed_when: false
+# RabbitMQ credentials are restored automatically:
+# The infra-operator's RabbitMQ controller labels the default-user secret
+# for restore. On restore, the secret is restored in order 10, and the
+# controller reuses the existing credentials when creating the new cluster.
 
 # ========================================
-# Step 9: Resume Full Deployment
+# Step 8: Resume Full Deployment
 # ========================================
 - name: Pause before resuming deployment
   ansible.builtin.pause:
@@ -447,7 +354,7 @@
   changed_when: false
 
 # ========================================
-# Step 10: Restore DataPlane (Order 60)
+# Step 9: Restore DataPlane (Order 60)
 # ========================================
 - name: Render dataplane restore
   ansible.builtin.template:
@@ -466,10 +373,10 @@
   ansible.builtin.include_tasks: wait_for_restore.yml
   vars:
     _restore_name: "openstack-restore-60-dataplane-{{ _restore_suffix }}"
-    _step_name: "Step 10 (DataPlane restore)"
+    _step_name: "Step 9 (DataPlane restore)"
 
 # ========================================
-# Step 11: EDPM Deployment
+# Step 10: EDPM Deployment
 # ========================================
 - name: Get DataPlaneNodeSet names
   ansible.builtin.shell: |
