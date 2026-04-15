@@ -150,11 +150,14 @@
   loop: "{{ _galera_instances }}"
   changed_when: true
 
-- name: Get list of GaleraBackup cronjobs
+- name: Wait for GaleraBackup cronjobs to be created
   ansible.builtin.shell: |
     oc get cronjob -n {{ cifmw_backup_restore_namespace }} -l app=galera -o jsonpath='{.items[*].metadata.name}'
   register: _galera_backup_cronjobs
   changed_when: false
+  until: _galera_backup_cronjobs.stdout.split() | length >= 2
+  retries: 30
+  delay: 10
 
 - name: Trigger Galera backup jobs
   ansible.builtin.shell: |
