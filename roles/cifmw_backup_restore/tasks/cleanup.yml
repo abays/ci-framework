@@ -207,25 +207,9 @@
   failed_when: false
   when: cifmw_backup_restore_cleanup_ctlplane | bool
 
-- name: Delete Galera database PVCs
-  ansible.builtin.shell: |
-    oc delete pvc -n {{ cifmw_backup_restore_namespace }} -l app=galera
-  changed_when: true
-  failed_when: false
-  when: cifmw_backup_restore_cleanup_ctlplane | bool
-
 - name: Delete RabbitMQUser CRs
   ansible.builtin.shell: |
     oc delete rabbitmquser --all -n {{ cifmw_backup_restore_namespace }}
-  changed_when: true
-  failed_when: false
-  when: cifmw_backup_restore_cleanup_ctlplane | bool
-
-- name: Delete RabbitMQ restored-user secrets
-  ansible.builtin.shell: |
-    for secret in $(oc get secret -n {{ cifmw_backup_restore_namespace }} -o name | grep '\-restored-user$'); do
-      oc delete -n {{ cifmw_backup_restore_namespace }} $secret
-    done
   changed_when: true
   failed_when: false
   when: cifmw_backup_restore_cleanup_ctlplane | bool
@@ -278,14 +262,14 @@
   when: cifmw_backup_restore_cleanup_ctlplane | bool
 
 # ========================================
-# Delete labeled PVCs (Data Mover)
+# Delete all PVCs
 # ========================================
-- name: Delete PVCs labeled for backup (Data Mover)
+- name: Delete all PVCs in namespace
   ansible.builtin.shell: |
-    oc delete pvc -n {{ cifmw_backup_restore_namespace }} -l backup.openstack.org/backup=true
+    oc delete pvc --all -n {{ cifmw_backup_restore_namespace }}
   changed_when: true
   failed_when: false
-  when: cifmw_backup_restore_snapshot_move_data | bool
+  when: cifmw_backup_restore_cleanup_ctlplane | bool
 
 # ========================================
 # Summary
