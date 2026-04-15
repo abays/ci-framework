@@ -420,6 +420,24 @@
   when: _nodeset_names.stdout != ""
 
 # ========================================
+# Step 11: Sync Neutron state to OVN database
+# ========================================
+# Run after EDPM deployment so all compute nodes' ovn-controller
+# are reconnected to the new OVN SB DB and their chassis are registered.
+# Running the sync before EDPM would cause the gateway chassis to
+# reprogram flows while compute tunnels are not yet established,
+# breaking VM network connectivity.
+- name: Sync Neutron state to OVN database
+  ansible.builtin.shell: |
+    oc exec -n {{ cifmw_backup_restore_namespace }} \
+      $(oc get pod -n {{ cifmw_backup_restore_namespace }} -l service=neutron -o jsonpath='{.items[0].metadata.name}') \
+      -c neutron-api -- neutron-ovn-db-sync-util \
+      --config-file /etc/neutron/neutron.conf \
+      --config-file /etc/neutron/plugins/ml2/ml2_conf.ini \
+      --ovn-neutron_sync_mode repair
+  changed_when: true
+
+# ========================================
 # Cleanup and Summary
 # ========================================
 - name: Clean up rendered templates
