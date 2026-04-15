@@ -31,8 +31,19 @@
 # Step 2: Create test workload
 # ========================================
 - name: Create test workload
-  when: cifmw_backup_restore_create_workload | default(false) | bool
+  when: cifmw_backup_restore_create_workload | default(true) | bool
+  vars:
+    # Override update role defaults: enable ping test so create_test_files.yml
+    # generates the workload launch script (role defaults are both false)
+    cifmw_update_ping_test: true
+    cifmw_openshift_kubeconfig: "{{ cifmw_openshift_kubeconfig | default(ansible_user_dir ~ '/.kube/config') }}"
   block:
+    - name: Ensure update artifacts directory exists
+      ansible.builtin.file:
+        path: "{{ cifmw_update_artifacts_basedir | default(ansible_user_dir ~ '/ci-framework-data/tests/update') }}"
+        state: directory
+        mode: "0755"
+
     - name: Generate workload launch script
       ansible.builtin.include_role:
         name: update
@@ -88,7 +99,118 @@
   when: cifmw_backup_restore_run_restore | default(true) | bool
 
 # ========================================
-# Step 6: Post-restore tempest validation
+# Step 6: Post-restore workload validation
+# ========================================
+- name: Validate test workload after restore
+  when:
+    - cifmw_backup_restore_create_workload | default(false) | bool
+    - cifmw_backup_restore_run_restore | default(true) | bool
+  vars:
+    _os_exec: >-
+      oc exec -t openstackclient -n {{ cifmw_backup_restore_namespace | default('openstack') }} --
+  block:
+    - name: Verify compute services are up
+      ansible.builtin.shell: |
+        {{ _os_exec }} openstack compute service list -f json | \
+          jq -r '.[] | "\(.Binary) \(.Host) \(.State)"'
+      register: _compute_services
+      changed_when: false
+
+    - name: Display compute services
+      ansible.builtin.debug:
+        msg: "{{ _compute_services.stdout_lines }}"
+
+    - name: Verify network agents are up
+      ansible.builtin.shell: |
+        {{ _os_exec }} openstack network agent list -f json | \
+          jq -r '.[] | "\(.["Agent Type"]) \(.Host) \(.Alive)"'
+      register: _network_agents
+      changed_when: false
+
+    - name: Display network agents
+      ansible.builtin.debug:
+        msg: "{{ _network_agents.stdout_lines }}"
+
+    - name: Get instance info
+      ansible.builtin.shell: |
+        {{ _os_exec }} openstack server list -f json | \
+          jq -r '.[0] | "\(.Name) \(.Status) \(.Networks)"'
+      register: _instance_info
+      changed_when: false
+
+    - name: Display instance info
+      ansible.builtin.debug:
+        msg: "Instance: {{ _instance_info.stdout }}"
+
+    - name: Get floating IP of test instance
+      ansible.builtin.shell: |
+        {{ _os_exec }} openstack server list -f json | \
+          jq -r '.[0].Networks' | grep -oP '[\d.]+' | tail -1
+      register: _instance_fip
+      changed_when: false
+
+    - name: Ping floating IP
+      ansible.builtin.shell: |
+        ping -c 3 -W 5 {{ _instance_fip.stdout }}
+      register: _ping_result
+      changed_when: false
+      retries: 6
+      delay: 10
+      until: _ping_result.rc == 0
+
+    - name: Display ping result
+      ansible.builtin.debug:
+        msg: "Ping to {{ _instance_fip.stdout }}: SUCCESS"
+
+    - name: Stop test instance
+      ansible.builtin.shell: |
+        INSTANCE=$({{ _os_exec }} openstack server list -f json | jq -r '.[0].Name')
+        {{ _os_exec }} openstack server stop ${INSTANCE}
+      changed_when: true
+
+    - name: Wait for instance to stop
+      ansible.builtin.shell: |
+        INSTANCE=$({{ _os_exec }} openstack server list -f json | jq -r '.[0].Name')
+        {{ _os_exec }} openstack server show ${INSTANCE} -f json | jq -r '.status'
+      register: _stop_status
+      changed_when: false
+      retries: 12
+      delay: 5
+      until: _stop_status.stdout == 'SHUTOFF'
+
+    - name: Start test instance
+      ansible.builtin.shell: |
+        INSTANCE=$({{ _os_exec }} openstack server list -f json | jq -r '.[0].Name')
+        {{ _os_exec }} openstack server start ${INSTANCE}
+      changed_when: true
+
+    - name: Wait for instance to become active
+      ansible.builtin.shell: |
+        INSTANCE=$({{ _os_exec }} openstack server list -f json | jq -r '.[0].Name')
+        {{ _os_exec }} openstack server show ${INSTANCE} -f json | jq -r '.status'
+      register: _start_status
+      changed_when: false
+      retries: 12
+      delay: 5
+      until: _start_status.stdout == 'ACTIVE'
+
+    - name: Ping floating IP after stop/start
+      ansible.builtin.shell: |
+        ping -c 3 -W 5 {{ _instance_fip.stdout }}
+      register: _ping_after_restart
+      changed_when: false
+      retries: 6
+      delay: 10
+      until: _ping_after_restart.rc == 0
+
+    - name: Post-restore workload validation passed
+      ansible.builtin.debug:
+        msg: >-
+          Workload validation passed: instance reachable via FIP {{ _instance_fip.stdout }},
+          stop/start successful, ping after restart OK
+
+# ========================================
+# Step 7: Post-restore tempest validation
 # ========================================
 - name: Run post-restore tempest validation
   ansible.builtin.include_role:
