@@ -60,7 +60,7 @@
 
   vars:
     cifmw_backup_restore_install_deps: true
-    cifmw_backup_restore_create_workload: false
+    cifmw_backup_restore_create_workload: true
     cifmw_backup_restore_run_backup: true
     cifmw_backup_restore_run_cleanup: true
     cifmw_backup_restore_run_restore: true
