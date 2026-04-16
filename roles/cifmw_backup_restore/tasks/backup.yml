@@ -200,7 +200,7 @@
     oc get cronjob -n {{ cifmw_backup_restore_namespace }} -l app=galera -o jsonpath='{.items[*].metadata.name}'
   register: _galera_backup_cronjobs
   changed_when: false
-  until: _galera_backup_cronjobs.stdout.split() | length >= 2
+  until: _galera_backup_cronjobs.stdout.split() | length >= _galera_instances | length
   retries: 30
   delay: 10
 
