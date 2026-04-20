@@ -45,6 +45,7 @@ OpenShift cluster.
 * `cifmw_backup_restore_ctlplane_ready_timeout`: (String) Timeout for `oc wait` on control plane `Ready` after removing the deployment-stage annotation. Defaults to `10m`.
 * `cifmw_backup_restore_strict_restore`: (Boolean) Fail on Velero `PartiallyFailed` status when `true`; only warn when `false`. Defaults to `true`.
 * `cifmw_backup_restore_restore_content`: (String) Content flag passed to `restore_galera` (`--content`). Defaults to `data`.
+* `cifmw_backup_restore_edpm_deploy_timeout`: (String) Timeout for `oc wait` on the post-restore EDPM deployment. Defaults to `40m`.
 * `cifmw_backup_restore_pin_pvcs`: (Boolean) Enable PVC-to-node pinning during restore for WaitForFirstConsumer storage classes. Defaults to `false`.
 
 ### Cleanup
