@@ -17,7 +17,8 @@
 # OpenStack Full Restore
 #
 # Restores an OpenStack control plane from OADP backups using ordered
-# Velero Restore CRs and automated database restore.
+# Velero Restore CRs, Galera restore, optional OVN NB/SB file restore,
+# then staged ControlPlane resume, dataplane, EDPM, and Neutron–OVN sync.
 
 - name: Validate backup_timestamp parameter
   ansible.builtin.fail:
@@ -334,13 +335,19 @@
   loop: "{{ _galerabackup_list }}"
   when: _galerabackup_list | length > 0
 
+# ========================================
+# Step 8: OVN database restore (optional; before full control plane resume)
+# ========================================
+- name: Include OVN database restore tasks
+  ansible.builtin.include_tasks: ovn_db_restore.yml
+
 # RabbitMQ credentials are restored automatically:
 # The infra-operator's RabbitMQ controller labels the default-user secret
 # for restore. On restore, the secret is restored in order 10, and the
 # controller reuses the existing credentials when creating the new cluster.
 
 # ========================================
-# Step 8: Resume Full Deployment
+# Step 9: Resume Full Deployment
 # ========================================
 - name: Pause before resuming deployment
   ansible.builtin.pause:
@@ -362,7 +369,7 @@
   changed_when: false
 
 # ========================================
-# Step 9: Restore DataPlane (Order 60)
+# Step 10: Restore DataPlane (Order 60)
 # ========================================
 - name: Render dataplane restore
   ansible.builtin.template:
@@ -382,10 +389,10 @@
   ansible.builtin.include_tasks: wait_for_restore.yml
   vars:
     _restore_name: "openstack-restore-60-dataplane-{{ _restore_suffix }}"
-    _step_name: "Step 9 (DataPlane restore)"
+    _step_name: "Step 10 (DataPlane restore)"
 
 # ========================================
-# Step 10: EDPM Deployment
+# Step 11: EDPM Deployment
 # ========================================
 - name: Get DataPlaneNodeSet names
   ansible.builtin.shell: |
@@ -430,21 +437,63 @@
   when: _nodeset_names.stdout != ""
 
 # ========================================
-# Step 11: Sync Neutron state to OVN database
+# Step 12: Verify and sync Neutron to OVN (user-guide backup-restore Step 12)
 # ========================================
-# Run after EDPM deployment so all compute nodes' ovn-controller
-# are reconnected to the new OVN SB DB and their chassis are registered.
-# Running the sync before EDPM would cause the gateway chassis to
-# reprogram flows while compute tunnels are not yet established,
-# breaking VM network connectivity.
-- name: Sync Neutron state to OVN database
+# Run after EDPM so compute ovn-controller agents reconnect to the SB DB first.
+# Log mode does not change exit code for drift (Neutron logs drift as WARNING lines).
+# Repair runs if OVN file backup was skipped, or if log output contains WARNING drift.
+# Ref: https://github.com/openstack-k8s-operators/dev-docs/blob/main/backup-restore/user-guide.md#step-12-verify-and-sync-neutron-to-ovn
+- name: Verify Neutron vs OVN (neutron-ovn-db-sync-util log mode)
   ansible.builtin.shell: |
-    oc exec -n {{ cifmw_backup_restore_namespace }} \
-      $(oc get pod -n {{ cifmw_backup_restore_namespace }} -l service=neutron -o jsonpath='{.items[0].metadata.name}') \
-      -c neutron-api -- neutron-ovn-db-sync-util \
+    set -o pipefail
+    oc exec -n {{ cifmw_backup_restore_namespace }} -c neutron-api deploy/neutron -- \
+      neutron-ovn-db-sync-util \
+      --config-file /usr/share/neutron/neutron-dist.conf \
       --config-file /etc/neutron/neutron.conf \
-      --config-file /etc/neutron/plugins/ml2/ml2_conf.ini \
-      --ovn-neutron_sync_mode repair
+      --config-dir /etc/neutron/neutron.conf.d \
+      --ovn-neutron_sync_mode=log \
+      --debug
+  register: _neutron_ovn_sync_log
+  changed_when: false
+
+- name: Decide whether Neutron–OVN repair sync is required
+  ansible.builtin.set_fact:
+    _neutron_ovn_needs_repair: >-
+      {{
+        (not (cifmw_backup_restore_ovn_db | bool))
+        or (
+          (cifmw_backup_restore_ovn_db | bool)
+          and (
+            ((_neutron_ovn_sync_log.stdout | default('')) ~ (_neutron_ovn_sync_log.stderr | default('')))
+            | regex_search('(?i)\bWARNING\b') is not none
+          )
+        )
+      }}
+
+- name: Report Neutron–OVN repair decision
+  ansible.builtin.debug:
+    msg: >-
+      neutron-ovn-db-sync repair:
+      {{ 'running' if _neutron_ovn_needs_repair | bool else 'skipped' }}.
+      {% if not (cifmw_backup_restore_ovn_db | bool) %}
+      Reason: cifmw_backup_restore_ovn_db is false (no OVN NB/SB file backup; OVN must be repopulated from Neutron).
+      {% elif _neutron_ovn_needs_repair | bool %}
+      Reason: log-mode output contained WARNING lines (Neutron-reported drift vs OVN).
+      {% else %}
+      Reason: OVN file backup/restore was used and log-mode output had no WARNING lines.
+      {% endif %}
+
+- name: Sync Neutron state to OVN database (repair mode)
+  ansible.builtin.shell: |
+    set -o pipefail
+    oc exec -n {{ cifmw_backup_restore_namespace }} -c neutron-api deploy/neutron -- \
+      neutron-ovn-db-sync-util \
+      --config-file /usr/share/neutron/neutron-dist.conf \
+      --config-file /etc/neutron/neutron.conf \
+      --config-dir /etc/neutron/neutron.conf.d \
+      --ovn-neutron_sync_mode=repair \
+      --debug
+  when: _neutron_ovn_needs_repair | bool
   changed_when: true
 
 # ========================================

@@ -4,11 +4,13 @@ Automate OpenStack on OpenShift backup and restore operations using OADP
 (OpenShift API for Data Protection) and Velero. The role supports three
 actions: **backup**, **restore**, and **cleanup**.
 
-- **backup** — creates Galera database dumps and Velero backups of labeled
-  PVCs (via CSI snapshots) and cluster resources.
+- **backup** — creates Galera database dumps, optionally backs up OVN NB/SB
+  databases onto their PVCs, then creates Velero backups of labeled PVCs
+  (via CSI snapshots) and cluster resources.
 - **restore** — performs an ordered Velero restore sequence (PVCs,
-  foundation, infrastructure, control plane, Galera, RabbitMQ, dataplane)
-  and waits for each phase to complete.
+  foundation, infrastructure, control plane, Galera, optional OVN file restore,
+  full control plane resume, dataplane, EDPM), then Neutron–OVN verification and
+  sync (**log** mode, then **repair**, matching the backup-restore user guide Step 12).
 - **cleanup** — tears down dataplane and control-plane resources so the
   namespace is ready for a fresh restore.
 
@@ -25,6 +27,8 @@ OpenShift cluster.
 * `cifmw_backup_restore_namespace`: (String) Target OpenStack namespace. Defaults to `openstack`.
 * `cifmw_backup_restore_oadp_namespace`: (String) Namespace where Velero/OADP is running. Defaults to `openshift-adp`.
 * `cifmw_backup_restore_auto_ack`: (Boolean) Skip interactive pause prompts when `true`. Defaults to `false`.
+* `cifmw_backup_restore_ovn_db`: (Boolean) When `true` (default), the **backup** path labels OVN NB/SB PVCs and runs `ovsdb-client` backup before the OADP PVC backup, and the **restore** path runs OVN NB/SB file restore after Galera (when timestamped files exist on the PVC) before resuming the full control plane. Set to `false` to skip both; post-EDPM `neutron-ovn-db-sync` still runs when OVN files were not backed up.
+* `cifmw_backup_restore_ovn_db_ready_timeout`: (String) Timeout for `oc wait` on OVN database pods during OVN backup/restore. Defaults to `5m`.
 
 ### Backup
 
@@ -47,6 +51,7 @@ OpenShift cluster.
 * `cifmw_backup_restore_restore_content`: (String) Content flag passed to `restore_galera` (`--content`). Defaults to `data`.
 * `cifmw_backup_restore_edpm_deploy_timeout`: (String) Timeout for `oc wait` on the post-restore EDPM deployment. Defaults to `40m`.
 * `cifmw_backup_restore_pin_pvcs`: (Boolean) Enable PVC-to-node pinning during restore for WaitForFirstConsumer storage classes. Defaults to `false`.
+* Post-EDPM **Neutron–OVN** steps follow [user guide Step 12](https://github.com/openstack-k8s-operators/dev-docs/blob/main/backup-restore/user-guide.md#step-12-verify-and-sync-neutron-to-ovn): run `neutron-ovn-db-sync-util` in `log` mode first (`neutron-dist.conf`, `neutron.conf`, `neutron.conf.d`). **Repair** runs if `cifmw_backup_restore_ovn_db` is `false` (no OVN NB/SB file backup was taken), or if log-mode stdout/stderr contains a `WARNING` line—Neutron reports drift that way while still exiting 0. If OVN file backup/restore was enabled and log output has no `WARNING` lines, repair is skipped as redundant.
 
 ### Cleanup
 

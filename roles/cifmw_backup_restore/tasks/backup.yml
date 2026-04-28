@@ -17,8 +17,9 @@
 # OpenStack Full Backup
 #
 # 1. Trigger Galera database dumps (creates fresh DB dumps on PVCs)
-# 2. OADP PVC backup (CSI snapshots of labeled PVCs)
-# 3. OADP resources backup (CRs, Secrets, ConfigMaps, NADs, etc.)
+# 2. Optional: label OVN PVCs and ovsdb-client backup (NB/SB) onto PVCs
+# 3. OADP PVC backup (CSI snapshots of labeled PVCs)
+# 4. OADP resources backup (CRs, Secrets, ConfigMaps, NADs, etc.)
 
 # ========================================
 # Pre-flight checks
@@ -190,7 +191,14 @@
   when: _galera_backup_cronjobs.stdout != ""
 
 # ========================================
-# Step 2: OADP PVC Backup (CSI Snapshots)
+# Step 2: OVN database backup (label PVCs; ovsdb-client backup)
+# ========================================
+- name: Include OVN database backup tasks
+  ansible.builtin.include_tasks: ovn_db_backup.yml
+  when: cifmw_backup_restore_ovn_db | bool
+
+# ========================================
+# Step 3: OADP PVC Backup (CSI Snapshots)
 # ========================================
 - name: List PVCs marked for backup
   ansible.builtin.shell: |
@@ -214,7 +222,9 @@
 - name: Pause before PVC backup
   ansible.builtin.pause:
     prompt: >-
-      Step 1 complete: Galera DB dumps. Press Enter to create PVC backup, or Ctrl+C then 'A' to abort
+      Step 1 complete: Galera DB dumps{% if cifmw_backup_restore_ovn_db | bool %}
+      ; Step 2 complete: OVN DB backups on PVCs{% endif %}.
+      Press Enter to create PVC backup, or Ctrl+C then 'A' to abort
   when: not (cifmw_backup_restore_auto_ack | bool)
 
 - name: Create OADP PVC backup
@@ -240,7 +250,7 @@
   when: _pvc_backup_phase.stdout != "Completed"
 
 # ========================================
-# Step 3: OADP Resources Backup
+# Step 4: OADP Resources Backup
 # ========================================
 - name: Render resources backup CR
   ansible.builtin.template:
@@ -251,7 +261,7 @@
 - name: Pause before resources backup
   ansible.builtin.pause:
     prompt: >-
-      Step 2 complete: PVC backup. Press Enter to create resources backup, or Ctrl+C then 'A' to abort
+      Step 3 complete: PVC backup. Press Enter to create resources backup, or Ctrl+C then 'A' to abort
   when: not (cifmw_backup_restore_auto_ack | bool)
 
 - name: Create OADP resources backup

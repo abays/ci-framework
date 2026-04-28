@@ -1,6 +1,9 @@
 ---
 # End-to-end backup/restore test playbook
 #
+# Aligns with the openstack-k8s-operators backup-restore user guide (Galera,
+# optional OVN NB/SB on PVC, OADP, ordered restore, Neutron–OVN sync post-EDPM).
+#
 # Used standalone or imported by post-deployment.yml (gated by
 # cifmw_run_backup_restore_test).
 #
