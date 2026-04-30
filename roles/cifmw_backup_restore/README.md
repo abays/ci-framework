@@ -2,7 +2,10 @@
 
 Automate OpenStack on OpenShift backup and restore operations using OADP
 (OpenShift API for Data Protection) and Velero. The role supports three
-actions: **backup**, **restore**, and **cleanup**.
+single actions (**backup**, **restore**, **cleanup**) plus an optional
+end-to-end scenario in **`tasks/e2e_test.yml`** (hooks, MinIO/OADP/GaleraBackup
+deps, optional workload, backup, cleanup, restore, validation, optional
+Tempest).
 
 - **backup** — creates Galera database dumps and Velero backups of labeled
   PVCs (via CSI snapshots) and cluster resources.
@@ -11,6 +14,10 @@ actions: **backup**, **restore**, and **cleanup**.
   and waits for each phase to complete.
 - **cleanup** — tears down dataplane and control-plane resources so the
   namespace is ready for a fresh restore.
+- **e2e_test.yml** — full pipeline; use `import_role` / `include_role` with
+  `tasks_from: e2e_test.yml`, or run `playbooks/backup_restore.yaml` (thin
+  wrapper). Integrates via `post-deployment.yml` when
+  `cifmw_run_backup_restore_test` is true.
 
 ## Privilege escalation
 
@@ -25,6 +32,16 @@ OpenShift cluster.
 * `cifmw_backup_restore_namespace`: (String) Target OpenStack namespace. Defaults to `openstack`.
 * `cifmw_backup_restore_oadp_namespace`: (String) Namespace where Velero/OADP is running. Defaults to `openshift-adp`.
 * `cifmw_backup_restore_auto_ack`: (Boolean) Skip interactive pause prompts when `true`. Defaults to `false`.
+
+### End-to-end test (`tasks/e2e_test.yml`)
+
+* `cifmw_backup_restore_install_deps`: (Boolean) Deploy MinIO, OADP, and GaleraBackup CRs. Defaults to `true`.
+* `cifmw_backup_restore_create_workload`: (Boolean) Create the optional test instance via the `update` role. Defaults to `true`.
+* `cifmw_backup_restore_run_backup` / `run_cleanup` / `run_restore`: (Boolean) Run each phase. Defaults to `true`.
+* `cifmw_backup_restore_run_post_tempest`: (Boolean) Run the test-operator role after restore. Defaults to `false`.
+* `cifmw_backup_restore_backup_timestamp`: (String) When running restore **without** backup in the same play, set this to the Velero backup suffix (e.g. `20260323-144546`).
+
+Workload-related defaults (`cifmw_update_*`) are passed to the `update` role when creating the test instance; they default to paths under `~/ci-framework-data/tests/update`.
 
 ### Backup
 
@@ -96,4 +113,16 @@ OpenShift cluster.
         cifmw_backup_restore_auto_ack: true
         cifmw_backup_restore_cleanup_ctlplane: true
         cifmw_backup_restore_cleanup_dataplane: true
+```
+
+### Full end-to-end test (same as `playbooks/backup_restore.yaml`)
+
+```YAML
+- hosts: localhost
+  gather_facts: true
+  tasks:
+    - name: Backup/restore E2E
+      ansible.builtin.import_role:
+        name: cifmw_backup_restore
+        tasks_from: e2e_test.yml
 ```

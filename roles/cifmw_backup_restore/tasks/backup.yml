@@ -124,6 +124,16 @@
   changed_when: false
   failed_when: false
 
+- name: Fail if OpenStack operator CSV cannot be resolved
+  ansible.builtin.fail:
+    msg: >-
+      Could not read ClusterServiceVersion for openstack-operator in namespace openstack-operators.
+      Install the operator or check: oc get csv -n openstack-operators
+      -l operators.coreos.com/openstack-operator.openstack-operators
+  when: >
+    _operator_csv_version.rc != 0
+    or (_operator_csv_version.stdout | default('', true) | length) == 0
+
 - name: Set operator version facts
   ansible.builtin.set_fact:
     _backup_csv_version: "{{ _operator_csv_version.stdout | default('unknown') }}"
