@@ -109,6 +109,15 @@
   changed_when: false
   failed_when: false
 
+- name: Fail if OpenStack operator CSV could not be determined
+  ansible.builtin.fail:
+    msg: |
+      Could not read OpenStack operator ClusterServiceVersion in namespace openstack-operators
+      (oc get csv -l operators.coreos.com/openstack-operator.openstack-operators).
+  when: >
+    (_operator_csv_version.rc | default(-1)) != 0 or
+    ((_operator_csv_version.stdout | default('')) | trim | length) == 0
+
 - name: Collect catalog source image
   ansible.builtin.shell: |
     oc get catalogsource -n openstack-operators \
@@ -127,7 +136,7 @@
 
 - name: Set operator version facts
   ansible.builtin.set_fact:
-    _backup_csv_version: "{{ _operator_csv_version.stdout | default('unknown') }}"
+    _backup_csv_version: "{{ _operator_csv_version.stdout }}"
     _backup_catalog_image: "{{ _operator_catalog_image.stdout | default('unknown') }}"
     _backup_operator_image: "{{ _operator_image.stdout | default('unknown') }}"
 

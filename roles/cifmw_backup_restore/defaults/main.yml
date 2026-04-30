@@ -26,6 +26,26 @@ cifmw_backup_restore_namespace: "{{ cifmw_openstack_namespace | default('opensta
 cifmw_backup_restore_oadp_namespace: openshift-adp
 cifmw_backup_restore_auto_ack: false
 
+# End-to-end orchestration (tasks/e2e.yml; invoked from post-deployment or playbooks/backup_restore.yaml)
+cifmw_backup_restore_install_deps: true
+cifmw_backup_restore_create_workload: true
+cifmw_backup_restore_run_backup: true
+cifmw_backup_restore_run_cleanup: true
+cifmw_backup_restore_run_restore: true
+cifmw_backup_restore_run_post_tempest: false
+
+# Passthrough to update role when creating the test workload (prefix matches update role, not this role)
+cifmw_update_ping_test: true
+cifmw_update_control_plane_check: false
+cifmw_update_artifacts_basedir_suffix: "tests/update"
+cifmw_update_artifacts_basedir: "{{ ansible_user_dir }}/ci-framework-data/{{ cifmw_update_artifacts_basedir_suffix }}"
+cifmw_update_workload_launch_script: "{{ cifmw_update_artifacts_basedir }}/workload_launch.sh"
+cifmw_update_timestamper_cmd: >-
+  | awk '{ print strftime("%Y-%m-%d %H:%M:%S |"), $0; fflush(); }'
+cifmw_update_ping_start_script: "{{ cifmw_update_artifacts_basedir }}/l3_agent_start_ping.sh"
+cifmw_update_ping_stop_script: "{{ cifmw_update_artifacts_basedir }}/l3_agent_stop_ping.sh"
+cifmw_update_namespace: "{{ cifmw_backup_restore_namespace }}"
+
 # Backup
 cifmw_backup_restore_galera_backup_timeout: 10m
 cifmw_backup_restore_galera_storage_class: ""
