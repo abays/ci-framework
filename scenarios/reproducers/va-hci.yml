@@ -80,7 +80,6 @@ cifmw_libvirt_manager_configuration:
       extra_disks_num: 3
       extra_disks_size: 30G
       nets:
-        - ocpbm
         - osp_trunk
     controller:
       uefi: "{{ cifmw_use_uefi }}"
