@@ -413,6 +413,41 @@
       --timeout={{ cifmw_backup_restore_ctlplane_ready_timeout }}
   changed_when: false
 
+# The restored nova_api.cell_mappings carry the pre-rotation cell DB
+# credentials until the operator rewrites them. Pods that started in that
+# window (notably the super-conductor) cache the stale connections in
+# nova's CELL_CACHE, so they must be restarted to re-read the mappings.
+- name: Restart cell-aware Nova services
+  when: cifmw_backup_restore_restart_nova | bool
+  vars:
+    _cifmw_backup_restore_nova_pod_selector: >-
+      service in (nova-api,nova-scheduler,nova-metadata,nova-conductor,nova-novncproxy)
+  block:
+    - name: Delete cell-aware Nova pods
+      ansible.builtin.shell: |
+        oc delete pod -n {{ cifmw_backup_restore_namespace }} \
+          -l '{{ _cifmw_backup_restore_nova_pod_selector }}' --ignore-not-found=true
+      changed_when: true
+
+    - name: Wait for cell-aware Nova pods to be ready
+      ansible.builtin.shell: |
+        oc wait pod -n {{ cifmw_backup_restore_namespace }} \
+          -l '{{ _cifmw_backup_restore_nova_pod_selector }}' \
+          --for=condition=Ready --timeout=60s
+      register: _nova_pods_ready
+      changed_when: false
+      retries: "{{ cifmw_backup_restore_service_retry_count }}"
+      delay: "{{ cifmw_backup_restore_service_retry_delay }}"
+      until: _nova_pods_ready.rc == 0
+
+    - name: Wait for OpenStackControlPlane to be ready after Nova restart
+      ansible.builtin.shell: |
+        oc wait openstackcontrolplane {{ _ctlplane_name.stdout }} \
+          -n {{ cifmw_backup_restore_namespace }} \
+          --for=condition=Ready \
+          --timeout={{ cifmw_backup_restore_ctlplane_ready_timeout }}
+      changed_when: false
+
 # ========================================
 # Step 9a: Restore BaremetalHosts (optional — baremetal-provisioned only)
 # ========================================

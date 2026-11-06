@@ -1,0 +1,95 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+# Boots a new instance in every compute availability zone (cell) after the
+# restore. New instances are scheduled and written to the target cell DB by
+# the Nova super-conductor, a path that stop/start of an existing instance
+# never exercises. The image, flavor and network are reused from the test
+# workload instance created before the backup.
+
+- name: Validate instance creation in every availability zone
+  vars:
+    _os_exec: >-
+      oc exec -t openstackclient -n {{ cifmw_backup_restore_namespace }} --
+    _workload_instance_jq: >-
+      [.[] | select(.Name | startswith("instance_"))][0].Name
+    _boot_params_jq: >-
+      def ref: if type == "object" then (.original_name // .id)
+      else (capture("\\((?<id>[^)]+)\\)$") // {id: .}).id end;
+      {image: (.image | ref), flavor: (.flavor | ref),
+      network: (.addresses | if type == "object" then keys[0] else split("=")[0] end)}
+  block:
+    - name: Get compute availability zones
+      ansible.builtin.shell: |
+        set -o pipefail
+        {{ _os_exec }} openstack availability zone list --compute -f json | \
+          jq -r '.[] | select(.["Zone Status"] == "available" and .["Zone Name"] != "internal") | .["Zone Name"]'
+      register: _az_list
+      changed_when: false
+
+    - name: Fail if no availability zones were found
+      ansible.builtin.fail:
+        msg: "No available compute availability zones found."
+      when: _az_list.stdout_lines | length == 0
+
+    - name: Get workload instance details
+      ansible.builtin.shell: |
+        set -o pipefail
+        INSTANCE=$({{ _os_exec }} openstack server list -f json | jq -r '{{ _workload_instance_jq }}')
+        {{ _os_exec }} openstack server show "${INSTANCE}" -f json | \
+          jq -c '{{ _boot_params_jq }}'
+      register: _workload_instance
+      changed_when: false
+
+    - name: Set boot parameters from the workload instance
+      ansible.builtin.set_fact:
+        _az_boot_image: "{{ (_workload_instance.stdout | from_json).image }}"
+        _az_boot_flavor: "{{ (_workload_instance.stdout | from_json).flavor }}"
+        _az_boot_network: "{{ (_workload_instance.stdout | from_json).network }}"
+
+    - name: Create an instance in each availability zone
+      ansible.builtin.shell: |
+        {{ _os_exec }} openstack server create \
+          --image {{ _az_boot_image }} \
+          --flavor {{ _az_boot_flavor }} \
+          --network {{ _az_boot_network }} \
+          --availability-zone {{ item }} \
+          cifmw-backup-restore-{{ item }}
+      loop: "{{ _az_list.stdout_lines }}"
+      changed_when: true
+
+    - name: Wait for the instances to become active
+      ansible.builtin.shell: |
+        set -o pipefail
+        {{ _os_exec }} openstack server show cifmw-backup-restore-{{ item }} -f value -c status
+      loop: "{{ _az_list.stdout_lines }}"
+      register: _az_instance_status
+      changed_when: false
+      retries: "{{ cifmw_backup_restore_service_retry_count }}"
+      delay: "{{ cifmw_backup_restore_service_retry_delay }}"
+      until: _az_instance_status.stdout | trim in ['ACTIVE', 'ERROR']
+      failed_when: _az_instance_status.stdout | trim != 'ACTIVE'
+
+    - name: Instance creation validated in every availability zone
+      ansible.builtin.debug:
+        msg: "Instances reached ACTIVE in availability zones: {{ _az_list.stdout_lines | join(', ') }}"
+  always:
+    - name: Delete the per-availability-zone test instances
+      ansible.builtin.shell: |
+        {{ _os_exec }} openstack server delete --wait cifmw-backup-restore-{{ item }}
+      loop: "{{ _az_list.stdout_lines | default([]) }}"
+      changed_when: true
+      failed_when: false
