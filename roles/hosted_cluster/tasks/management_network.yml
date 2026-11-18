@@ -105,7 +105,33 @@
       {%- endfor -%}
       {{ _ifaces }}
 
-- name: Apply the NodeNetworkConfigurationPolicy for the hosted cluster isolated networks
+- name: Read the shared isolated networks NodeNetworkConfigurationPolicy
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    api_version: nmstate.io/v1
+    kind: NodeNetworkConfigurationPolicy
+    name: "{{ cifmw_hosted_cluster_nncp_name }}"
+  register: _hosted_cluster_nncp_existing
+
+# The bridges are shared by every hosted cluster on this management cluster,
+# so a run with a different NIC or VLAN set must not silently rewrite them.
+- name: Require a compatible shared NodeNetworkConfigurationPolicy
+  when: _hosted_cluster_nncp_existing.resources | default([]) | length == 1
+  ansible.builtin.assert:
+    that:
+      - >-
+        _hosted_cluster_nncp_existing.resources[0].spec.desiredState.interfaces |
+        map(attribute='name') | sort ==
+        _hosted_cluster_nncp_interfaces | map(attribute='name') | sort
+    fail_msg: >-
+      NodeNetworkConfigurationPolicy {{ cifmw_hosted_cluster_nncp_name }} already
+      defines different interfaces. Hosted clusters on one management cluster
+      share these bridges, so cifmw_hosted_cluster_management_interface and
+      the isolated network VLAN IDs must match across runs.
+
+- name: Apply the shared NodeNetworkConfigurationPolicy for the hosted cluster isolated networks
   kubernetes.core.k8s:
     kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
     api_key: "{{ cifmw_openshift_token | default(omit) }}"
@@ -115,7 +141,7 @@
       apiVersion: nmstate.io/v1
       kind: NodeNetworkConfigurationPolicy
       metadata:
-        name: "{{ cifmw_hosted_cluster_name }}-isolated-networks"
+        name: "{{ cifmw_hosted_cluster_nncp_name }}"
       spec:
         nodeSelector: "{{ cifmw_hosted_cluster_management_node_selector }}"
         desiredState:
@@ -128,7 +154,7 @@
     context: "{{ cifmw_openshift_context | default(omit) }}"
     api_version: nmstate.io/v1
     kind: NodeNetworkConfigurationPolicy
-    name: "{{ cifmw_hosted_cluster_name }}-isolated-networks"
+    name: "{{ cifmw_hosted_cluster_nncp_name }}"
   register: _hosted_cluster_nncp
   until:
     - _hosted_cluster_nncp.resources | default([]) | length == 1

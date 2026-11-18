@@ -133,6 +133,17 @@
          cifmw_hosted_cluster_resolved_root_volume_storage_class]
         if cifmw_hosted_cluster_map_infra_storage_class | bool else []
       }}
+    # Without this mapping KubeVirt CSI falls back to the infra default
+    # VolumeSnapshotClass, so guest snapshots (and OADP) break if none is set.
+    _hosted_cluster_infra_volume_snapshot_class_mapping: >-
+      {{
+        ['--infra-volumesnapshot-class-mapping=' ~
+         cifmw_hosted_cluster_resolved_volume_snapshot_class ~ '/' ~
+         cifmw_hosted_cluster_resolved_volume_snapshot_class]
+        if (cifmw_hosted_cluster_map_infra_storage_class | bool and
+            cifmw_hosted_cluster_resolved_volume_snapshot_class | default('') | length > 0)
+        else []
+      }}
   environment:
     KUBECONFIG: "{{ cifmw_openshift_kubeconfig }}"
   ansible.builtin.command:
@@ -157,6 +168,7 @@
         ] + _hosted_cluster_additional_networks +
         ['--additional-network=name:' ~ cifmw_hosted_cluster_hosted_namespace ~ '/datacentre'] +
         _hosted_cluster_infra_storage_class_mapping +
+        _hosted_cluster_infra_volume_snapshot_class_mapping +
         ['--render', '--render-sensitive']
       }}
   register: _hosted_cluster_rendered

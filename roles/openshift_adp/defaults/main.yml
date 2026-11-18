@@ -23,6 +23,11 @@ cifmw_openshift_adp_channel: stable
 cifmw_openshift_adp_enable_node_agent: true
 
 # S3 backend (MinIO or other S3-compatible)
+# When set, used as the S3 endpoint instead of the local minio-api route, so
+# several clusters can share one bucket (e.g. restoring into another cluster).
+cifmw_openshift_adp_s3_url: ""
+# Use ReadOnly on a cluster that only restores from a bucket written elsewhere.
+cifmw_openshift_adp_bsl_access_mode: ReadWrite
 cifmw_openshift_adp_s3_namespace: minio
 cifmw_openshift_adp_s3_bucket: velero
 cifmw_openshift_adp_s3_region: minio

@@ -36,8 +36,9 @@
       - "========================================"
       - "OADP Namespace: {{ cifmw_openshift_adp_namespace }}"
       - "OADP Channel: {{ cifmw_openshift_adp_channel }}"
-      - "S3 Namespace: {{ cifmw_openshift_adp_s3_namespace }}"
+      - "S3 Endpoint: {{ cifmw_openshift_adp_s3_url | default('', true) or ('local route in ' ~ cifmw_openshift_adp_s3_namespace) }}"
       - "S3 Bucket: {{ cifmw_openshift_adp_s3_bucket }}"
+      - "Backup Location Access Mode: {{ cifmw_openshift_adp_bsl_access_mode }}"
       - "Node Agent (Kopia): {{ cifmw_openshift_adp_enable_node_agent }}"
 
 - name: Create OADP namespace
@@ -111,6 +112,7 @@
   no_log: true
 
 - name: Get S3 API route
+  when: cifmw_openshift_adp_s3_url | length == 0
   kubernetes.core.k8s_info:
     api_version: route.openshift.io/v1
     kind: Route
@@ -141,13 +143,16 @@
           - velero:
               provider: aws
               default: true
+              accessMode: "{{ cifmw_openshift_adp_bsl_access_mode }}"
               objectStorage:
                 bucket: "{{ cifmw_openshift_adp_s3_bucket }}"
                 prefix: "{{ cifmw_openshift_adp_s3_prefix }}"
               config:
                 region: "{{ cifmw_openshift_adp_s3_region }}"
                 s3ForcePathStyle: "{{ cifmw_openshift_adp_s3_force_path_style | lower }}"
-                s3Url: "https://{{ _s3_api_route.resources[0].spec.host }}"
+                s3Url: >-
+                  {{ cifmw_openshift_adp_s3_url if cifmw_openshift_adp_s3_url | length > 0
+                     else 'https://' ~ _s3_api_route.resources[0].spec.host }}
                 insecureSkipTLSVerify: "{{ cifmw_openshift_adp_s3_insecure_skip_tls | lower }}"
               credential:
                 name: cloud-credentials
@@ -234,12 +239,30 @@
     selectattr('driver', 'equalto', 'topolvm.io') |
     list | length > 0
 
-- name: Print VolumeSnapshotClass status (no TopoLVM)
+# KubeVirt CSI (KubeVirt hosted clusters) snapshot classes are created by
+# HyperShift from --infra-volumesnapshot-class-mapping; Velero only needs
+# the label.
+- name: Label KubeVirt CSI VolumeSnapshotClasses for OADP
+  kubernetes.core.k8s:
+    state: patched
+    definition:
+      apiVersion: snapshot.storage.k8s.io/v1
+      kind: VolumeSnapshotClass
+      metadata:
+        name: "{{ item.metadata.name }}"
+        labels:
+          velero.io/csi-volumesnapshot-class: "true"
+  loop: "{{ _vsc_list.resources | selectattr('driver', 'equalto', 'csi.kubevirt.io') | list }}"
+  loop_control:
+    label: "{{ item.metadata.name }}"
+
+- name: Print VolumeSnapshotClass status (no TopoLVM or KubeVirt CSI)
   ansible.builtin.debug:
-    msg: "No TopoLVM driver found. If using a different CSI driver, manually create a VolumeSnapshotClass with velero.io/csi-volumesnapshot-class=true label."
+    msg: "No TopoLVM or KubeVirt CSI driver found. If using a different CSI driver, manually create a VolumeSnapshotClass with velero.io/csi-volumesnapshot-class=true label."
   when: >-
     _vsc_list.resources |
-    selectattr('driver', 'equalto', 'topolvm.io') |
+    map(attribute='driver') |
+    select('in', ['topolvm.io', 'csi.kubevirt.io']) |
     list | length == 0
 
 # ========================================

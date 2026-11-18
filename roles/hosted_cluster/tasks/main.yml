@@ -31,6 +31,10 @@
       MetalLB address range for the hosted cluster's KubeAPI.
   when: not cifmw_hosted_cluster_render_only | bool
 
+- name: Validate the targeted cluster
+  when: not cifmw_hosted_cluster_render_only | bool
+  ansible.builtin.include_tasks: validate_target.yml
+
 - name: Create hosted cluster artifacts directory
   ansible.builtin.file:
     path: "{{ cifmw_hosted_cluster_artifacts_dir }}"

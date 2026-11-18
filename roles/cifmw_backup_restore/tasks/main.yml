@@ -22,4 +22,7 @@
   when: cifmw_backup_restore_action not in ['backup', 'restore', 'cleanup']
 
 - name: Run {{ cifmw_backup_restore_action }}
-  ansible.builtin.include_tasks: "{{ cifmw_backup_restore_action }}.yml"
+  ansible.builtin.include_tasks:
+    file: "{{ cifmw_backup_restore_action }}.yml"
+    apply:
+      environment: "{{ {'KUBECONFIG': cifmw_openshift_kubeconfig} if cifmw_openshift_kubeconfig is defined else {} }}"

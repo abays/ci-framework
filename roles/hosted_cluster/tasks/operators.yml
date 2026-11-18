@@ -210,3 +210,34 @@
   loop: "{{ _hosted_cluster_storage_classes.results }}"
   loop_control:
     label: "{{ item.item }}"
+
+- name: List management cluster VolumeSnapshotClasses
+  when: cifmw_hosted_cluster_map_infra_storage_class | bool
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    api_version: snapshot.storage.k8s.io/v1
+    kind: VolumeSnapshotClass
+  register: _hosted_cluster_volume_snapshot_classes
+
+- name: Resolve the management cluster VolumeSnapshotClass to map into the hosted cluster
+  when: cifmw_hosted_cluster_map_infra_storage_class | bool
+  vars:
+    _provisioner: "{{ _hosted_cluster_storage_classes.results[1].resources[0].provisioner }}"
+  ansible.builtin.set_fact:
+    cifmw_hosted_cluster_resolved_volume_snapshot_class: >-
+      {{ cifmw_hosted_cluster_volume_snapshot_class | default('', true) or
+         (_hosted_cluster_volume_snapshot_classes.resources |
+          selectattr('driver', 'equalto', _provisioner) |
+          map(attribute='metadata.name') | sort | first | default('')) }}
+
+- name: Warn when no VolumeSnapshotClass will be mapped into the hosted cluster
+  when:
+    - cifmw_hosted_cluster_map_infra_storage_class | bool
+    - cifmw_hosted_cluster_resolved_volume_snapshot_class | length == 0
+  ansible.builtin.debug:
+    msg: >-
+      No VolumeSnapshotClass matches the root volume storage class
+      provisioner on the management cluster. Volume snapshots, and therefore
+      CSI-based backups, will not work in the hosted cluster.

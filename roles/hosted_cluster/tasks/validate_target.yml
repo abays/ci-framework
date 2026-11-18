@@ -1,0 +1,38 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Read the targeted cluster infrastructure
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    api_version: config.openshift.io/v1
+    kind: Infrastructure
+    name: cluster
+  register: _hosted_cluster_target_infra
+
+- name: Require cifmw_openshift_kubeconfig to target the management cluster
+  ansible.builtin.assert:
+    that:
+      - _hosted_cluster_target_infra.resources | length == 1
+      - _hosted_cluster_target_infra.resources[0].status.controlPlaneTopology | default('') != 'External'
+    fail_msg: >-
+      cifmw_openshift_kubeconfig={{ cifmw_openshift_kubeconfig }} targets a
+      hosted cluster, not the management cluster. A previous run's retarget
+      is probably still in the Ansible fact cache or in
+      artifacts/parameters/zz-hosted-cluster-params.yml; pass
+      cifmw_openshift_kubeconfig=<management kubeconfig> explicitly, delete
+      that file, and use --flush-cache.
