@@ -178,13 +178,23 @@
       first to create GaleraBackup CRs.
   when: _galera_backup_cronjobs.stdout == ""
 
+- name: Pin the dump jobs and data movers to one worker
+  when: >-
+    (cifmw_backup_restore_data_node | default('', true) | length > 0) or
+    (cifmw_deploy_hosted_cluster | default(false) | bool)
+  ansible.builtin.include_tasks: pin_data_node.yml
+
 - name: Trigger Galera backup jobs
+  vars:
+    _job_node_jq: >-
+      {{ '.spec.template.spec.nodeSelector = {"kubernetes.io/hostname":"' ~ _cifmw_backup_restore_data_node ~ '"} | '
+         if _cifmw_backup_restore_data_node | default('') | length > 0 else '' }}
   ansible.builtin.shell: |
     set -o pipefail
     BACKUP_JOB_NAME="{{ item }}-{{ cifmw_backup_restore_backup_name_suffix }}"
     oc -n {{ cifmw_backup_restore_namespace }} create job --from=cronjob/{{ item }} ${BACKUP_JOB_NAME} \
       --dry-run=client -o json | \
-      jq '.spec.template.spec.containers[0].env += [{"name":"BACKUP_TIMESTAMP","value":"{{ cifmw_backup_restore_backup_name_suffix }}"}]' | \
+      jq '{{ _job_node_jq }}.spec.template.spec.containers[0].env += [{"name":"BACKUP_TIMESTAMP","value":"{{ cifmw_backup_restore_backup_name_suffix }}"}]' | \
       oc -n {{ cifmw_backup_restore_namespace }} create -f -
     echo ${BACKUP_JOB_NAME}
   loop: "{{ _galera_backup_cronjobs.stdout.split() }}"
@@ -198,6 +208,22 @@
   loop: "{{ _galera_backup_jobs.results }}"
   changed_when: false
   when: _galera_backup_cronjobs.stdout != ""
+
+- name: Record the node on the dump PVCs
+  when: _cifmw_backup_restore_data_node | default('') | length > 0
+  kubernetes.core.k8s:
+    state: patched
+    definition:
+      apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
+        name: "{{ item }}"
+        namespace: "{{ cifmw_backup_restore_namespace }}"
+        annotations:
+          cifmw.openstack.org/data-node: "{{ _cifmw_backup_restore_data_node }}"
+  loop: >-
+    {{ (_data_node_pvcs | default({'resources': []})).resources |
+       map(attribute='metadata.name') | select('match', '^mysql-backup-') | list }}
 
 # ========================================
 # Step 2: OVN database backup (label PVCs; ovsdb-client backup)

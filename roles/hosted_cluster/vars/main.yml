@@ -20,3 +20,6 @@
 # intended to be modified.
 
 # All variables within this role should have a prefix of "cifmw_hosted_cluster"
+
+# Shared by every hosted cluster on the management cluster.
+cifmw_hosted_cluster_nncp_name: hosted-cluster-isolated-networks

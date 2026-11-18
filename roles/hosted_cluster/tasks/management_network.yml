@@ -105,7 +105,33 @@
       {%- endfor -%}
       {{ _ifaces }}
 
-- name: Apply the NodeNetworkConfigurationPolicy for the hosted cluster isolated networks
+- name: Read the shared isolated networks NodeNetworkConfigurationPolicy
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    api_key: "{{ cifmw_openshift_token | default(omit) }}"
+    context: "{{ cifmw_openshift_context | default(omit) }}"
+    api_version: nmstate.io/v1
+    kind: NodeNetworkConfigurationPolicy
+    name: "{{ cifmw_hosted_cluster_nncp_name }}"
+  register: _hosted_cluster_nncp_existing
+
+# The bridges are shared by every hosted cluster on this management cluster,
+# so a run with a different NIC or VLAN set must not silently rewrite them.
+- name: Require a compatible shared NodeNetworkConfigurationPolicy
+  when: _hosted_cluster_nncp_existing.resources | default([]) | length == 1
+  ansible.builtin.assert:
+    that:
+      - >-
+        _hosted_cluster_nncp_existing.resources[0].spec.desiredState.interfaces |
+        map(attribute='name') | sort ==
+        _hosted_cluster_nncp_interfaces | map(attribute='name') | sort
+    fail_msg: >-
+      NodeNetworkConfigurationPolicy {{ cifmw_hosted_cluster_nncp_name }} already
+      defines different interfaces. Hosted clusters on one management cluster
+      share these bridges, so cifmw_hosted_cluster_management_interface and
+      the isolated network VLAN IDs must match across runs.
+
+- name: Apply the shared NodeNetworkConfigurationPolicy for the hosted cluster isolated networks
   kubernetes.core.k8s:
     kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
     api_key: "{{ cifmw_openshift_token | default(omit) }}"
@@ -115,7 +141,7 @@
       apiVersion: nmstate.io/v1
       kind: NodeNetworkConfigurationPolicy
       metadata:
-        name: "{{ cifmw_hosted_cluster_name }}-isolated-networks"
+        name: "{{ cifmw_hosted_cluster_nncp_name }}"
       spec:
         nodeSelector: "{{ cifmw_hosted_cluster_management_node_selector }}"
         desiredState:
@@ -128,7 +154,7 @@
     context: "{{ cifmw_openshift_context | default(omit) }}"
     api_version: nmstate.io/v1
     kind: NodeNetworkConfigurationPolicy
-    name: "{{ cifmw_hosted_cluster_name }}-isolated-networks"
+    name: "{{ cifmw_hosted_cluster_nncp_name }}"
   register: _hosted_cluster_nncp
   until:
     - _hosted_cluster_nncp.resources | default([]) | length == 1
@@ -144,13 +170,28 @@
 # task/include_role-scoped `vars:` -- so this must be a real set_fact, not a
 # `vars:` on the include_role task below (the latter silently no-ops: the
 # role's own "when patches exist" check never sees it).
+#
+# These NADs give the worker VMs their NIC addresses, so they use the worker
+# range and not the networks' multus range: the hosted cluster's own NADs
+# hand pods that same multus range, and sharing it hands a pod an address a
+# worker NIC already holds.
 - name: Patch ci_multus to render bridge/linux-bridge NADs for the isolated networks
   ansible.builtin.set_fact:
     cifmw_ci_multus_net_info_patch_1: >-
+      {%- set _first = cifmw_hosted_cluster_worker_net_range_start | int -%}
+      {%- set _last = _first + (cifmw_hosted_cluster_worker_net_range_length | int) - 1 -%}
       {%- set _patch = {} -%}
       {%- for _net in cifmw_hosted_cluster_networks -%}
+        {%- set _cidr = cifmw_networking_definition.networks[_net].network -%}
         {%- set _ = _patch.update({
-          _net: {'tools': {'multus': {'multus_type': 'bridge', 'multus_attach': 'linux-bridge'}}},
+          _net: {'tools': {'multus': {
+            'multus_type': 'bridge',
+            'multus_attach': 'linux-bridge',
+            'ipv4_ranges': [{
+              'start': _cidr | ansible.utils.nthhost(_first),
+              'end': _cidr | ansible.utils.nthhost(_last),
+            }],
+          }}},
         }) -%}
       {%- endfor -%}
       {{ _patch }}

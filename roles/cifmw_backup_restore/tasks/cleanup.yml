@@ -60,6 +60,48 @@
   ansible.builtin.debug:
     msg: "{{ _resource_counts.stdout_lines }}"
 
+- name: Check for PVCs on storage classes without a provisioner
+  when: cifmw_backup_restore_cleanup_ctlplane | bool
+  block:
+    - name: List storage classes
+      kubernetes.core.k8s_info:
+        api_version: storage.k8s.io/v1
+        kind: StorageClass
+      register: _cleanup_storage_classes
+
+    - name: List PVCs in the namespace
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: PersistentVolumeClaim
+        namespace: "{{ cifmw_backup_restore_namespace }}"
+      register: _cleanup_pvcs
+
+    - name: Find PVCs that cannot be re-provisioned after deletion
+      vars:
+        _no_provisioner_classes: >-
+          {{ _cleanup_storage_classes.resources |
+             selectattr('provisioner', 'equalto', 'kubernetes.io/no-provisioner') |
+             map(attribute='metadata.name') | list }}
+      ansible.builtin.set_fact:
+        _cleanup_static_pvcs: >-
+          {{ _cleanup_pvcs.resources |
+             selectattr('spec.storageClassName', 'defined') |
+             selectattr('spec.storageClassName', 'in', _no_provisioner_classes) |
+             map(attribute='metadata.name') | list }}
+
+    - name: Refuse to delete PVCs whose PVs cannot be recycled
+      when:
+        - _cleanup_static_pvcs | length > 0
+        - not (cifmw_backup_restore_cleanup_ignore_static_pvs | bool)
+      ansible.builtin.fail:
+        msg: >-
+          These PVCs use a StorageClass without a provisioner
+          ({{ _cleanup_static_pvcs | join(', ') }}). Deleting them leaves
+          their pre-created PVs Released, so the restored PVCs cannot bind
+          and the restore never completes. Use dynamically provisioned
+          storage, or recycle the PVs yourself and set
+          cifmw_backup_restore_cleanup_ignore_static_pvs=true.
+
 - name: Confirm deletion
   ansible.builtin.pause:
     prompt: "WARNING: This will delete OpenStack resources in {{ cifmw_backup_restore_namespace }}. Continue? (yes/no)"

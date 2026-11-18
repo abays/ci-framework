@@ -105,6 +105,12 @@ cifmw_hosted_cluster_lvms_disk_list: []
 # worker VMs are ever given a real secondary disk by some other means).
 cifmw_hosted_cluster_map_infra_storage_class: true
 
+# Management cluster VolumeSnapshotClass mapped into the guest cluster under
+# the same name via `--infra-volumesnapshot-class-mapping`, so OADP/CSI
+# snapshots work there. Empty picks the one whose driver matches the root
+# volume storage class provisioner. Only used with the storage class mapping.
+cifmw_hosted_cluster_volume_snapshot_class: ""
+
 # Empty release_image resolves to the management cluster's own version,
 # mirroring the ClusterVersion-derived default used by `hcp create cluster`.
 cifmw_hosted_cluster_release_image: ""

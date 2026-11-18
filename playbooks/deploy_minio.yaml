@@ -1,0 +1,20 @@
+---
+# Deploy MinIO on the cluster selected by KUBECONFIG.
+#
+# Use it on a management cluster so that several hosted clusters can share one
+# S3 bucket that outlives each of them, for example for Velero backups taken
+# on one hosted cluster and restored on another:
+#
+#   KUBECONFIG=<management kubeconfig> ansible-playbook playbooks/deploy_minio.yaml
+#
+# The API route printed at the end is the value for cifmw_openshift_adp_s3_url.
+# The credentials are cifmw_deploy_minio_root_user / _root_password
+# (minio / minio123 by default).
+
+- name: Deploy MinIO
+  hosts: "{{ cifmw_target_host | default('localhost') }}"
+  gather_facts: false
+  tasks:
+    - name: Deploy MinIO on the targeted cluster
+      ansible.builtin.import_role:
+        name: deploy_minio

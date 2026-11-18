@@ -44,3 +44,46 @@
       - op: replace
         path: /spec/defaultNetwork/ovnKubernetesConfig/gatewayConfig/ipForwarding
         value: Global
+
+# The guest has no LVMS of its own, so nothing marks the mapped class as
+# default and PVCs that omit storageClassName (e.g. MinIO, GaleraBackup) stay
+# Pending. This mirrors the default class LVMS provides in the non-hosted flow.
+- name: Wait for the mapped storage class in the hosted cluster
+  when: cifmw_hosted_cluster_map_infra_storage_class | bool
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cifmw_hosted_cluster_artifacts_dir }}/kubeconfig-{{ cifmw_hosted_cluster_name }}"
+    api_version: storage.k8s.io/v1
+    kind: StorageClass
+  register: _hosted_cluster_guest_storage_classes
+  until: >-
+    cifmw_hosted_cluster_resolved_root_volume_storage_class in
+    (_hosted_cluster_guest_storage_classes.resources | map(attribute='metadata.name') | list)
+  retries: "{{ cifmw_hosted_cluster_wait_retries }}"
+  delay: "{{ cifmw_hosted_cluster_wait_delay }}"
+
+- name: Find default storage classes in the hosted cluster
+  when: cifmw_hosted_cluster_map_infra_storage_class | bool
+  ansible.builtin.set_fact:
+    _hosted_cluster_default_storage_classes: >-
+      {%- set _found = [] -%}
+      {%- for _sc in _hosted_cluster_guest_storage_classes.resources -%}
+        {%- if (_sc.metadata.annotations | default({})).get('storageclass.kubernetes.io/is-default-class') == 'true' -%}
+          {%- set _ = _found.append(_sc.metadata.name) -%}
+        {%- endif -%}
+      {%- endfor -%}
+      {{ _found }}
+
+- name: Make the mapped storage class the default in the hosted cluster
+  when:
+    - cifmw_hosted_cluster_map_infra_storage_class | bool
+    - _hosted_cluster_default_storage_classes | length == 0
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cifmw_hosted_cluster_artifacts_dir }}/kubeconfig-{{ cifmw_hosted_cluster_name }}"
+    state: patched
+    definition:
+      apiVersion: storage.k8s.io/v1
+      kind: StorageClass
+      metadata:
+        name: "{{ cifmw_hosted_cluster_resolved_root_volume_storage_class }}"
+        annotations:
+          storageclass.kubernetes.io/is-default-class: "true"

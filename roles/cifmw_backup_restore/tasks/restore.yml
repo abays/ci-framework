@@ -64,12 +64,18 @@
     oc get backup {{ _pvc_backup_name }} -n {{ cifmw_backup_restore_oadp_namespace }} -o jsonpath='{.status.phase}'
   register: _pvc_backup_phase
   changed_when: false
+  retries: 20
+  delay: 10
+  until: _pvc_backup_phase.rc == 0
 
 - name: Verify resources backup exists
   ansible.builtin.shell: |
     oc get backup {{ _resources_backup_name }} -n {{ cifmw_backup_restore_oadp_namespace }} -o jsonpath='{.status.phase}'
   register: _resources_backup_phase
   changed_when: false
+  retries: 20
+  delay: 10
+  until: _resources_backup_phase.rc == 0
 
 - name: Fail if backups are not completed
   ansible.builtin.fail:

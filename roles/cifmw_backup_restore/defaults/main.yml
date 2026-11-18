@@ -33,6 +33,7 @@ cifmw_backup_restore_run_backup: true
 cifmw_backup_restore_run_cleanup: true
 cifmw_backup_restore_run_restore: true
 cifmw_backup_restore_run_post_tempest: false
+cifmw_backup_restore_stop_hosted_cluster: true
 cifmw_backup_restore_test_swift_data: true
 cifmw_backup_restore_swift_test_container: "backup-test-container"
 cifmw_backup_restore_swift_test_object: "backup-test-object"
@@ -57,6 +58,10 @@ cifmw_backup_restore_galera_storage_request: 5Gi
 cifmw_backup_restore_galera_transfer_storage_request: 5Gi
 cifmw_backup_restore_oadp_backup_timeout: 30m
 cifmw_backup_restore_storage_location: velero-1
+# Worker that runs the Galera dump jobs and Velero data movers. Empty means
+# the one recorded on the dump PVCs, else the first ready worker, and only on
+# KubeVirt hosted clusters; set it to turn pinning on elsewhere.
+cifmw_backup_restore_data_node: ""
 cifmw_backup_restore_backup_ttl: 720h
 cifmw_backup_restore_snapshot_move_data: true
 cifmw_backup_restore_swift_xattr_timeout: 600s
@@ -78,6 +83,11 @@ cifmw_backup_restore_ctlplane_ready_timeout: 30m
 cifmw_backup_restore_strict_restore: true
 cifmw_backup_restore_restore_content: data
 cifmw_backup_restore_pin_pvcs: false
+# Extra Velero resource modifier rules appended to the restore ConfigMap, e.g.
+# to give the restored control plane different IPs. Each rule has
+# `conditions` and any of `patches` (JSON Patch), `mergePatches` or
+# `strategicPatches`; `patchData` may be a mapping or a string.
+cifmw_backup_restore_extra_resource_modifier_rules: []
 
 # Post-restore service readiness
 cifmw_backup_restore_service_retry_count: 30
@@ -85,4 +95,5 @@ cifmw_backup_restore_service_retry_delay: 10
 
 # Cleanup
 cifmw_backup_restore_cleanup_ctlplane: true
+cifmw_backup_restore_cleanup_ignore_static_pvs: false
 cifmw_backup_restore_cleanup_dataplane: true

@@ -1,0 +1,118 @@
+---
+# Copyright Red Hat, Inc.
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+
+# On KubeVirt hosted clusters with node-local infra storage a volume lives on
+# the node of the first worker VM that used it, and only VMs on that node can
+# attach it later. Pin the dump jobs and the Velero data movers to one worker,
+# and remember it on the dump PVCs so later runs use the same one.
+- name: List PVCs in the namespace
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: PersistentVolumeClaim
+    namespace: "{{ cifmw_backup_restore_namespace }}"
+  register: _data_node_pvcs
+
+- name: List worker nodes
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Node
+    label_selectors:
+      - node-role.kubernetes.io/worker
+  register: _data_node_workers
+
+- name: Collect the nodes recorded on the dump PVCs and the usable workers
+  ansible.builtin.set_fact:
+    _data_node_recorded: >-
+      {%- set _found = [] -%}
+      {%- for _pvc in _data_node_pvcs.resources if _pvc.metadata.name.startswith('mysql-backup-') -%}
+        {%- set _node = (_pvc.metadata.annotations | default({})).get('cifmw.openstack.org/data-node') -%}
+        {%- if _node -%}{%- set _ = _found.append(_node) -%}{%- endif -%}
+      {%- endfor -%}
+      {{ _found | unique | sort }}
+    _data_node_ready: >-
+      {%- set _ready = [] -%}
+      {%- for _node in _data_node_workers.resources if not (_node.spec.unschedulable | default(false)) -%}
+        {%- for _cond in _node.status.conditions | default([]) if _cond.type == 'Ready' and _cond.status == 'True' -%}
+          {%- set _ = _ready.append(_node.metadata.name) -%}
+        {%- endfor -%}
+      {%- endfor -%}
+      {{ _ready | sort }}
+
+- name: Choose the node for the dump jobs and data movers
+  ansible.builtin.set_fact:
+    _cifmw_backup_restore_data_node: >-
+      {{ cifmw_backup_restore_data_node | default('', true) or
+         (_data_node_recorded | first | default('')) or
+         (_data_node_ready | first | default('')) }}
+
+- name: Require a single usable node
+  ansible.builtin.assert:
+    that:
+      - _cifmw_backup_restore_data_node | length > 0
+      - _cifmw_backup_restore_data_node in (_data_node_workers.resources | map(attribute='metadata.name') | list)
+      - _data_node_recorded | length <= 1
+      - >-
+        cifmw_backup_restore_data_node | default('', true) | length == 0 or
+        _data_node_recorded | length == 0 or
+        _data_node_recorded[0] == cifmw_backup_restore_data_node
+    fail_msg: >-
+      Could not choose one node for the Galera dump volumes. Chosen:
+      '{{ _cifmw_backup_restore_data_node }}', recorded on the dump PVCs:
+      {{ _data_node_recorded }}. The dump volumes live on one node and cannot
+      move; set cifmw_backup_restore_data_node to the worker they were first
+      used on, or delete the mysql-backup-* PVCs to start over.
+
+- name: Read the DataProtectionApplication
+  kubernetes.core.k8s_info:
+    api_version: oadp.openshift.io/v1alpha1
+    kind: DataProtectionApplication
+    name: velero
+    namespace: "{{ cifmw_backup_restore_oadp_namespace }}"
+  register: _data_node_dpa
+
+- name: Pin the Velero data movers to the chosen node
+  when: >-
+    ((_data_node_dpa.resources[0].spec.configuration.nodeAgent.loadAffinity | default([]) | first | default({})).nodeSelector | default({})).matchLabels | default({}) |
+    dict2items | map(attribute='value') | list != [_cifmw_backup_restore_data_node]
+  block:
+    - name: Set the node agent load affinity
+      kubernetes.core.k8s:
+        state: patched
+        definition:
+          apiVersion: oadp.openshift.io/v1alpha1
+          kind: DataProtectionApplication
+          metadata:
+            name: velero
+            namespace: "{{ cifmw_backup_restore_oadp_namespace }}"
+          spec:
+            configuration:
+              nodeAgent:
+                loadAffinity:
+                  - nodeSelector:
+                      matchLabels:
+                        kubernetes.io/hostname: "{{ _cifmw_backup_restore_data_node }}"
+
+    # Velero reads the load affinity when node-agent starts.
+    - name: Restart the node agents
+      ansible.builtin.command:
+        cmd: oc -n {{ cifmw_backup_restore_oadp_namespace }} rollout restart daemonset/node-agent
+      changed_when: true
+
+    - name: Wait for the node agents
+      ansible.builtin.command:
+        cmd: oc -n {{ cifmw_backup_restore_oadp_namespace }} rollout status daemonset/node-agent --timeout=5m
+      changed_when: false

@@ -48,3 +48,12 @@ data:
               openstack.org/skip-webhook-validation: ""
               openstack.org/paused: ""
 {% endif %}
+{% for _rule in cifmw_backup_restore_extra_resource_modifier_rules %}
+    - conditions: {{ _rule.conditions | to_json }}
+{% if _rule.patches is defined %}
+      patches: {{ _rule.patches | to_json }}
+{% endif %}
+{% for _kind in ['mergePatches', 'strategicPatches'] if _rule[_kind] is defined %}
+      {{ _kind }}: [{% for _p in _rule[_kind] %}{"patchData": {{ (_p.patchData if _p.patchData is string else _p.patchData | to_json) | to_json }}}{{ ', ' if not loop.last }}{% endfor %}]
+{% endfor %}
+{% endfor %}

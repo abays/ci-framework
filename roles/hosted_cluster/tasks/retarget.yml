@@ -27,6 +27,11 @@
                cifmw_hosted_cluster_name) | from_yaml
       }}
 
+- name: Remember the management cluster kubeconfig
+  ansible.builtin.set_fact:
+    cifmw_hosted_cluster_management_kubeconfig: "{{ cifmw_openshift_kubeconfig }}"
+    cacheable: true
+
 - name: Retarget OpenShift access at the hosted cluster
   ansible.builtin.set_fact:
     cifmw_openshift_kubeconfig: "{{ cifmw_hosted_cluster_artifacts_dir }}/kubeconfig-{{ cifmw_hosted_cluster_name }}"
@@ -55,6 +60,7 @@
       cifmw_openshift_api: "{{ cifmw_openshift_api }}"
       cifmw_openshift_context: "{{ cifmw_openshift_context }}"
       cifmw_openshift_user: "{{ cifmw_openshift_user }}"
+      cifmw_hosted_cluster_management_kubeconfig: "{{ cifmw_hosted_cluster_management_kubeconfig }}"
       cifmw_hosted_cluster_datacentre_interface: "{{ cifmw_hosted_cluster_datacentre_interface }}"
       {% if cifmw_openshift_token %}
       cifmw_openshift_token: "{{ cifmw_openshift_token }}"

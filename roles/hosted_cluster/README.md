@@ -40,6 +40,12 @@ is combined with matters:
   today -- verify the scenario you pick before enabling
   `cifmw_deploy_hosted_cluster`.
 
+With the storage class mapping on (the default), the RHOSO control plane
+PVCs in the hosted cluster use the `local-storage` class, which has no
+provisioner and no CSI snapshots, not the mapped class. The mapped class is
+used only by PVCs that name it or take the default. This affects backup and
+restore; see the storage requirements in the `cifmw_backup_restore` README.
+
 ## Prerequisites
 
 * A management OCP cluster able to run OpenShift Virtualization (bare metal
@@ -119,7 +125,10 @@ is combined with matters:
    `Ready`.
 4. Enables global IP forwarding on the hosted cluster's network, the one
    setting genuinely specific to a KubeVirt hosted control plane that the
-   generic RHOSO flow does not configure.
+   generic RHOSO flow does not configure. With the storage class mapping on,
+   it also makes the mapped storage class the default in the hosted cluster
+   when it has none, as LVMS does in the non-hosted flow, so PVCs without a
+   `storageClassName` (MinIO, `GaleraBackup`) bind.
 5. Discovers each hosted worker's real interface names: reads the
    deterministic MAC and IP HyperShift/KubeVirt/whereabouts assigned to each
    isolated-network NIC from its `VirtualMachineInstance`, adds the node to
@@ -177,7 +186,7 @@ the OpenStack init CR it generates.
 | `cifmw_hosted_cluster_management_node_selector` | `{node-role.kubernetes.io/master: ""}` | Node selector for the isolated-networks `NodeNetworkConfigurationPolicy`. |
 | `cifmw_hosted_cluster_nmstate_channel` | `stable` | NMState Operator subscription channel. |
 | `cifmw_hosted_cluster_worker_group` | `hosted_cluster_workers` | networking_mapper group-template / inventory group name for the hosted worker nodes. |
-| `cifmw_hosted_cluster_worker_net_range_start` / `_length` | `200` / `10` | IP range reserved for hosted workers within each isolated network, kept clear of the `ocps`/`ocp_workers`/`computes` ranges. |
+| `cifmw_hosted_cluster_worker_net_range_start` / `_length` | `200` / `10` | IP range the hosted worker VM NICs draw from within each isolated network (the management cluster NADs use it) and the `networking_mapper` range for the worker group. Keep it clear of the `ocps`/`ocp_workers`/`computes` ranges and of the networks' multus range, which the hosted cluster's own pods use: sharing it can give a pod an address a worker NIC already holds. |
 | `cifmw_hosted_cluster_ssh_user` | `core` | SSH user on the hosted worker VMs. |
 | `cifmw_hosted_cluster_ssh_public_key` / `_ssh_private_key` | `~/.ssh/id_cifw{.pub,}` | Automation keypair passed to `hcp create cluster kubevirt --ssh-key` and used to gather facts from the hosted workers. |
 | `cifmw_hosted_cluster_worker_count` | `3` | NodePool replicas (KubeVirt VM workers). |
@@ -188,6 +197,7 @@ the OpenStack init CR it generates.
 | `cifmw_hosted_cluster_etcd_storage_class` | empty | Existing RWO storage class for hosted etcd; empty installs `ci_lvms_storage`. |
 | `cifmw_hosted_cluster_lvms_disk_list` | `[]` | Block devices on the **management cluster's** OCP nodes for `ci_lvms_storage`, used only when the two storage class variables above are empty. Separate from the global `cifmw_lvms_disk_list`. |
 | `cifmw_hosted_cluster_map_infra_storage_class` | `true` | Maps the management cluster's resolved root-volume storage class into the guest cluster under the same name via `hcp create cluster kubevirt --infra-storage-class-mapping`, and makes the generic storage-class-selection steps in `deploy_architecture.yml` / `deploy_edpm.yml` / `ci_gen_kustomize_values` / `test_operator` skip the `cifmw_use_lvms` LVMS branch for the guest cluster -- the guest's KubeVirt worker VMs have no secondary data disk for a second, real LVMS install to use. Set `false` to restore the old behavior. |
+| `cifmw_hosted_cluster_volume_snapshot_class` | empty | Management cluster `VolumeSnapshotClass` mapped into the guest cluster under the same name via `--infra-volumesnapshot-class-mapping`, so CSI snapshots (and OADP backups) work there. Empty selects the class whose driver matches the root volume storage class provisioner; a warning is shown if none exists. Only used when `cifmw_hosted_cluster_map_infra_storage_class` is true. |
 | `cifmw_hosted_cluster_release_image` | empty | Hosted cluster release image; empty resolves to the management cluster's own version. |
 | `cifmw_hosted_cluster_cnv_channel` | `stable` | OpenShift Virtualization subscription channel. |
 | `cifmw_hosted_cluster_mce_channel` | `stable-2.17` | MCE subscription channel. No generic "stable" meta-channel exists -- verify this matches your OpenShift release against the MCE Support Matrix on access.redhat.com; `stable-2.17` is current for OpenShift 4.20-4.22. |
@@ -221,12 +231,67 @@ cifmw_edpm_deploy_baremetal: false
 The hosted kubeconfig is saved at
 `{{ cifmw_hosted_cluster_artifacts_dir }}/kubeconfig-{{ cifmw_hosted_cluster_name }}`.
 
+## Multiple hosted clusters on one management cluster
+
+Several hosted clusters can share one management cluster, for example two
+independently versioned RHOSO control planes. Run the role once per hosted
+cluster, each as its own environment:
+
+* Use a different `cifmw_hosted_cluster_name`,
+  `cifmw_hosted_cluster_kubeapi_address_pool` and
+  `cifmw_hosted_cluster_worker_net_range_start` for each hosted cluster. Set
+  a per-cluster `cifmw_hosted_cluster_release_image` to version them
+  independently.
+* A run's retarget persists in two places: cacheable facts (cleared by
+  `--flush-cache`, which the reproducer's `deploy-architecture.sh` always
+  passes) and `artifacts/parameters/zz-hosted-cluster-params.yml`, which
+  `cifmw_setup` loads at the start of every run. Before creating another
+  hosted cluster on the same management cluster, move that file aside. Do
+  **not** pass `-e cifmw_openshift_kubeconfig=...`: extra vars outrank the
+  role's `set_fact` retarget, so the later phases would target the management
+  cluster instead of the new hosted cluster. The role fails early if
+  `cifmw_openshift_kubeconfig` still points at a hosted cluster. When
+  running the playbooks directly, a separate `cifmw_basedir` and
+  `ANSIBLE_FACT_CACHING_CONNECTION` per cluster also keeps runs apart.
+* Every run must use the same `cifmw_hosted_cluster_management_interface` and
+  isolated network VLAN IDs. OpenShift Virtualization, MCE, MetalLB,
+  NMState, and the `hosted-cluster-isolated-networks`
+  `NodeNetworkConfigurationPolicy` with its Linux bridges are shared, and the
+  run fails if an existing policy defines different interfaces. Separation
+  between clusters comes from IP ranges, not L2: give each run's
+  `cifmw_networking_definition` different `multus`/MetalLB ranges for the
+  isolated networks, and a different `cifmw_hosted_cluster_worker_net_range_start`.
+  The role resolves the `multus`, `metallb` and `netconfig` ranges of the
+  isolated networks from the raw networking definition plus any
+  `cifmw_networking_mapper_definition_patch_*` variables on every run, merges
+  them into the Networking Environment Definition and saves it. Because the
+  patch lists replace the default ranges, a run without a patch restores the
+  defaults. Hosted cluster network resources, such as NADs, MetalLB pools and the
+  NetConfig, that were created earlier keep their old ranges until the
+  `network-configuration` stage runs again.
+* Everything else is per cluster and named after
+  `cifmw_hosted_cluster_name`: the `HostedCluster`, the `clusters-<name>`
+  namespace and its NADs, and the KubeAPI MetalLB pool. MetalLB rejects
+  overlapping address pools, which catches a repeated KubeAPI range.
+
+Hosted clusters add CPU load on the management cluster's nodes, and every
+worker VM's vCPUs count against the hypervisor. When a source cluster has been
+backed up and only the destination is needed, the `cifmw_backup_restore` role
+halts the source cluster's worker VMs after a backup-only run (see
+`cifmw_backup_restore_stop_hosted_cluster`) using `tasks/stop.yml`. That file
+reads `cifmw_hosted_cluster_management_kubeconfig`, which `retarget.yml` saves
+next to the hosted cluster kubeconfig. The VM disks are kept. To start the
+cluster again, set `spec.runStrategy` of each `VirtualMachine` in
+`clusters-<name>` back to `Always` (or `virtctl start`). The services in it
+come back from a full outage, so a Galera cluster may need recovery.
+
 ## Iterating / cleanup
 
 `cleanup-hosted-cluster.yml` (repo root) tears down just the hosted
 control plane -- the `HostedCluster`, its `clusters-<name>` control plane
 namespace (and the trunk NAD it owns), and the KubeAPI MetalLB pool/
-advertisement -- without touching the management cluster or the operators
+advertisement -- without touching the management cluster, other hosted
+clusters, the shared isolated-networks policy and bridges, or the operators
 (OpenShift Virtualization, MCE, MetalLB) and storage class this role
 installed on it. This makes it cheap to iterate: run it, then re-run your
 normal deploy to recreate the hosted cluster from scratch.
